@@ -1,14 +1,6 @@
-import { create } from 'zustand';
 import { Goal } from './types';
 import { mockGoals } from './mockData';
 
-interface GoalStore {
-  goals: Goal[];
-  addGoal: (goal: Goal) => void;
-  updateGoal: (id: string, updates: Partial<Goal>) => void;
-}
-
-// Simple in-memory store (no persistence needed for demo)
 let _goals = [...mockGoals];
 let _listeners: (() => void)[] = [];
 

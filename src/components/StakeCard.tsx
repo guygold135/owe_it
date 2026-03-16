@@ -3,7 +3,7 @@ import { Goal } from '@/lib/types';
 import { useCountdown } from '@/hooks/useCountdown';
 import { Lock, Eye, User } from 'lucide-react';
 
-const springTransition = { type: 'spring', stiffness: 300, damping: 30 };
+const springTransition = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
 export function StakeCard({ goal, onClick }: { goal: Goal; onClick?: () => void }) {
   const { days, hours, minutes, seconds, isUrgent, isExpired } = useCountdown(goal.deadline);

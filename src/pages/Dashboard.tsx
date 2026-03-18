@@ -2,32 +2,37 @@ import { motion } from 'framer-motion';
 import { useGoals } from '@/hooks/useGoals';
 import { StakeCard } from '@/components/StakeCard';
 import { DollarSign, Target, Trophy } from 'lucide-react';
+import UserProfilePopover from '@/components/UserProfilePopover';
 
 export default function Dashboard() {
   const { goals } = useGoals();
   const activeGoals = goals.filter(g => g.status === 'active');
   const totalAtRisk = activeGoals.reduce((sum, g) => sum + g.stake, 0);
+  const watchingJudges = activeGoals.filter(g => !g.judge.isSelf).length;
   const completed = goals.filter(g => g.status === 'completed').length;
 
   return (
     <div className="min-h-screen bg-background pb-28">
       {/* Header */}
-      <div className="px-6 pt-12 pb-6">
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-xs uppercase tracking-widest text-muted-foreground"
-        >
-          Owe It
-        </motion.p>
-        <motion.h1
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="text-3xl font-display font-extrabold text-foreground mt-2 tracking-tight"
-        >
-          Put your money where<br />your ambition is.
-        </motion.h1>
+      <div className="px-6 pt-12 pb-6 flex items-start justify-between gap-4">
+        <div>
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-xs uppercase tracking-widest text-muted-foreground"
+          >
+            Owe It
+          </motion.p>
+          <motion.h1
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="text-3xl font-display font-extrabold text-foreground mt-2 tracking-tight"
+          >
+            Put your money where<br />your ambition is.
+          </motion.h1>
+        </div>
+        <UserProfilePopover />
       </div>
 
       {/* Stats */}
@@ -62,7 +67,7 @@ export default function Dashboard() {
         </div>
         {totalAtRisk > 0 && (
           <p className="text-center text-xs text-muted-foreground mt-4">
-            You have <span className="text-warning font-semibold">${totalAtRisk.toFixed(2)}</span> at risk this week. {activeGoals.length} judges are watching.
+            {watchingJudges > 0 ? `${watchingJudges} judges are watching.` : ''}
           </p>
         )}
       </motion.div>

@@ -11,6 +11,9 @@ import Dashboard from "./pages/Dashboard";
 import Pulse from "./pages/Pulse";
 import Friends from "./pages/Friends";
 import Auth from "./pages/Auth";
+import Settings from "./pages/Settings";
+import History from "./pages/History";
+import MyJudges from "./pages/MyJudges";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -42,6 +45,9 @@ function AppRoutes() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/pulse" element={<Pulse />} />
         <Route path="/friends" element={<Friends />} />
+        <Route path="/my-judges" element={<MyJudges />} />
+        <Route path="/history" element={<History />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="/auth" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

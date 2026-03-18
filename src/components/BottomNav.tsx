@@ -1,11 +1,12 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { Target, Zap, Users, Plus } from 'lucide-react';
+import { Target, Zap, Users, Plus, Scale } from 'lucide-react';
 
 export function BottomNav({ onCreateGoal }: { onCreateGoal: () => void }) {
   const location = useLocation();
 
   const navItems = [
     { to: '/', icon: Target, label: 'Goals' },
+    { to: '/my-judges', icon: Scale, label: 'My judges' },
     { to: '/pulse', icon: Zap, label: 'Pulse' },
     { to: '/friends', icon: Users, label: 'Friends' },
   ];
@@ -30,7 +31,7 @@ export function BottomNav({ onCreateGoal }: { onCreateGoal: () => void }) {
         })}
         <button
           onClick={onCreateGoal}
-          className="w-12 h-12 rounded-2xl bg-primary flex items-center justify-center glow-primary -mt-6"
+          className="w-12 h-12 rounded-2xl bg-primary flex items-center justify-center glow-primary -mt-3"
         >
           <Plus className="w-6 h-6 text-primary-foreground" />
         </button>

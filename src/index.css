@@ -110,4 +110,14 @@
   .animate-pulse-border-warning {
     animation: pulse-border-warning 2s ease-in-out infinite;
   }
+
+  /* Hide number input spinners for a cleaner stake input */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
 }

@@ -1,8 +1,13 @@
 import { motion } from 'framer-motion';
 import { Friend } from '@/lib/types';
 import { Target, Trophy, DollarSign, UserPlus, Share2 } from 'lucide-react';
+import { convertStakeAmount, formatStakeAmount } from '@/lib/currency';
+import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
 
 export function FriendCard({ friend, index }: { friend: Friend; index: number }) {
+  const { currency: selectedCurrency } = useStakeCurrencyPreference();
+  const convertedTotalStaked = convertStakeAmount(friend.totalStaked, 'usd', selectedCurrency);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -27,7 +32,9 @@ export function FriendCard({ friend, index }: { friend: Friend; index: number })
         </div>
         <div className="text-right">
           <p className="text-xs text-muted-foreground uppercase tracking-widest">Total staked</p>
-          <p className="font-display font-bold text-foreground tabular-nums">${friend.totalStaked}</p>
+          <p className="font-display font-bold text-foreground tabular-nums">
+            {formatStakeAmount(convertedTotalStaked, selectedCurrency)}
+          </p>
         </div>
       </div>
     </motion.div>

@@ -5,6 +5,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Sonner: dismiss sits at end of row (like JudgeGoalCreatedNoticeHost), not absolutely in the corner. */
+@layer components {
+  [data-sonner-toast][data-styled="true"] [data-close-button] {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+  }
+}
+
 @layer base {
   :root {
     --background: 220 20% 14%;
@@ -51,6 +60,9 @@
 
     --glow-primary: 0 0 20px hsla(145, 80%, 55%, 0.3);
     --glow-warning: 0 0 20px hsla(25, 90%, 55%, 0.3);
+
+    --success: 142 76% 36%;
+    --success-foreground: 144 100% 97%;
   }
 }
 
@@ -65,6 +77,32 @@
 
   h1, h2, h3, h4, h5, h6 {
     font-family: 'Schibsted Grotesk', sans-serif;
+  }
+
+  /* Theme-aware scrollbars across the app */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.6) hsl(var(--muted) / 0.2);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--muted) / 0.2);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.6);
+    border-radius: 9999px;
+    border: 2px solid hsl(var(--background));
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.7);
   }
 }
 
@@ -101,6 +139,25 @@
   @keyframes pulse-border-warning {
     0%, 100% { border-color: hsl(var(--warning) / 0.3); }
     50% { border-color: hsl(var(--warning) / 0.7); }
+  }
+
+  @keyframes pop-in {
+    0% {
+      transform: scale(0.6);
+      opacity: 0;
+    }
+    60% {
+      transform: scale(1.1);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  .animate-pop-in {
+    animation: pop-in 0.4s ease-out forwards;
   }
 
   .animate-pulse-border {

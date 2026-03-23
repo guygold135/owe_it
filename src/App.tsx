@@ -6,7 +6,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BottomNav } from "@/components/BottomNav";
 import { CreateGoalSheet } from "@/components/CreateGoalSheet";
-import { useAuth } from "@/hooks/useAuth";
+import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { useAbandonStaleJudgeRequestsOnBootstrap } from "@/hooks/useAbandonStaleJudgeRequestsOnBootstrap";
 import Dashboard from "./pages/Dashboard";
 import Pulse from "./pages/Pulse";
 import Friends from "./pages/Friends";
@@ -14,13 +15,27 @@ import Auth from "./pages/Auth";
 import Settings from "./pages/Settings";
 import History from "./pages/History";
 import MyJudges from "./pages/MyJudges";
+import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
+import { JudgeRequestToastHost } from "@/components/JudgeRequestToastHost";
+import { JudgeGoalCreatedNoticeHost } from "@/components/JudgeGoalCreatedNoticeHost";
+import { DeadlineReminderToastHost } from "@/components/DeadlineReminderToastHost";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60_000,
+      gcTime: 10 * 60_000,
+      refetchOnWindowFocus: false,
+      retry: false,
+    },
+  },
+});
 
 function AppRoutes() {
   const { user, loading } = useAuth();
   const [createOpen, setCreateOpen] = useState(false);
+  useAbandonStaleJudgeRequestsOnBootstrap(user?.id);
 
   if (loading) {
     return (
@@ -48,11 +63,15 @@ function AppRoutes() {
         <Route path="/my-judges" element={<MyJudges />} />
         <Route path="/history" element={<History />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/profile" element={<Profile />} />
         <Route path="/auth" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
       <BottomNav onCreateGoal={() => setCreateOpen(true)} />
       <CreateGoalSheet open={createOpen} onClose={() => setCreateOpen(false)} />
+      <JudgeRequestToastHost />
+      <JudgeGoalCreatedNoticeHost />
+      <DeadlineReminderToastHost />
     </div>
   );
 }
@@ -60,13 +79,15 @@ function AppRoutes() {
 const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-      </TooltipProvider>
+      <AuthProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </TooltipProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 };

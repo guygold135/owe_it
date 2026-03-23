@@ -1,108 +1,68 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Goal, Judge } from '@/lib/types';
+import { useCallback, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Goal } from '@/lib/types';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-
-type GoalRow = {
-  id: string;
-  title: string;
-  description: string | null;
-  stake: number;
-  deadline: string;
-  created_at: string;
-  status: 'active' | 'completed' | 'failed';
-  judge_name: string | null;
-  judge_user_id?: string | null;
-  is_private: boolean;
-};
-
-function mapRowToGoal(row: GoalRow): Goal {
-  const judge: Judge = {
-    id: row.judge_name ?? 'self',
-    name: row.judge_name ?? 'You',
-    avatar: '',
-    isSelf: !row.judge_name,
-  };
-
-  return {
-    id: row.id,
-    title: row.title,
-    description: row.description ?? '',
-    stake: row.stake,
-    deadline: new Date(row.deadline),
-    createdAt: new Date(row.created_at),
-    status: row.status,
-    judge,
-    isPrivate: row.is_private,
-  };
-}
+import { queryKeys } from '@/lib/queryKeys';
+import { fetchUserGoals } from '@/lib/fetchers/tabData';
 
 export function useGoals() {
-  const [goals, setGoals] = useState<Goal[]>([]);
-  const [loading, setLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
+  const queryClient = useQueryClient();
 
-  const loadGoals = useCallback(async () => {
-    // Wait until we know auth state
-    if (authLoading) return;
+  const userId = user?.id;
 
-    if (!user) {
-      setGoals([]);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('goals')
-      .select('id,title,description,stake,deadline,created_at,status,judge_name,is_private,user_id')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Error loading goals', error);
-      toast.error('Could not load your goals.');
-      setLoading(false);
-      return;
-    }
-
-    setGoals((data as GoalRow[]).map(mapRowToGoal));
-    setLoading(false);
-  }, [authLoading, user]);
+  const query = useQuery({
+    queryKey: queryKeys.goals(userId ?? ''),
+    queryFn: async () => {
+      try {
+        return await fetchUserGoals(userId!);
+      } catch (e) {
+        console.error('Error loading goals', e);
+        toast.error('Could not load your goals.');
+        return [] as Goal[];
+      }
+    },
+    enabled: !!userId && !authLoading,
+    retry: false,
+  });
 
   useEffect(() => {
-    void loadGoals();
-  }, [loadGoals]);
-
-  // Keep goals in sync when a judge resolves them
-  useEffect(() => {
-    if (!user?.id) return;
+    if (!userId) return;
     const channel = supabase
-      .channel(`goals_${user.id}`)
+      .channel(`goals_${userId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'goals', filter: `user_id=eq.${user.id}` },
+        { event: '*', schema: 'public', table: 'goals', filter: `user_id=eq.${userId}` },
         () => {
-          void loadGoals();
+          void queryClient.invalidateQueries({ queryKey: queryKeys.goals(userId) });
         }
       )
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loadGoals, user?.id]);
+  }, [userId, queryClient]);
+
+  const loadGoals = useCallback(async () => {
+    if (!userId) return;
+    void queryClient.invalidateQueries({ queryKey: queryKeys.goals(userId) });
+  }, [queryClient, userId]);
+
+  const goals = query.data ?? [];
 
   const addGoal = async (goal: Goal) => {
     if (!user) {
       throw new Error('No user is signed in.');
     }
 
-    const { error } = await supabase.from('goals').insert({
+    const insertWithCurrency = await supabase.from('goals').insert({
       user_id: user.id,
       title: goal.title,
       description: goal.description,
       stake: goal.stake,
+      stake_currency: goal.stakeCurrency,
       deadline: goal.deadline.toISOString(),
       status: goal.status,
       judge_name: goal.judge?.isSelf ? null : goal.judge?.name,
@@ -110,13 +70,31 @@ export function useGoals() {
       is_private: goal.isPrivate,
     });
 
+    let error = insertWithCurrency.error;
+    if (error) {
+      const message = String((error as { message?: unknown })?.message ?? '').toLowerCase();
+      if (message.includes('stake_currency')) {
+        const retry = await supabase.from('goals').insert({
+          user_id: user.id,
+          title: goal.title,
+          description: goal.description,
+          stake: goal.stake,
+          deadline: goal.deadline.toISOString(),
+          status: goal.status,
+          judge_name: goal.judge?.isSelf ? null : goal.judge?.name,
+          judge_user_id: goal.judge?.isSelf ? user.id : goal.judge?.id,
+          is_private: goal.isPrivate,
+        });
+        error = retry.error;
+      }
+    }
+
     if (error) {
       console.error('Error creating goal', error);
       toast.error('Could not create goal.');
       throw error;
     }
 
-    // Social Pulse event (friends feed) — skip private goals
     if (!goal.isPrivate) {
       try {
         const action = goal.stake > 0 ? 'staked' : 'created';
@@ -132,13 +110,22 @@ export function useGoals() {
     }
 
     toast.success('Goal created.');
-    await loadGoals();
+    await queryClient.invalidateQueries({ queryKey: queryKeys.goals(user.id) });
   };
 
   const updateGoal = async (id: string, updates: Partial<Goal>) => {
     if (!user) {
       throw new Error('No user is signed in.');
     }
+
+    const { data: beforeRows } = await supabase
+      .from('goals')
+      .select('status,title,stake,is_private')
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    const beforeStatus = (beforeRows as any)?.status as 'active' | 'completed' | 'failed' | undefined;
 
     const payload: any = {};
     if (updates.title !== undefined) payload.title = updates.title;
@@ -151,14 +138,14 @@ export function useGoals() {
     }
     if (updates.isPrivate !== undefined) payload.is_private = updates.isPrivate;
 
-    const { data: beforeRows } = await supabase
-      .from('goals')
-      .select('status,title,stake,is_private')
-      .eq('id', id)
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    const beforeStatus = (beforeRows as any)?.status as GoalRow['status'] | undefined;
+    if (
+      updates.status &&
+      (updates.status === 'completed' || updates.status === 'failed') &&
+      beforeStatus === 'active'
+    ) {
+      payload.resolved_at = new Date().toISOString();
+      payload.resolved_by = user.id;
+    }
     const beforeTitle = (beforeRows as any)?.title as string | undefined;
     const beforeStake = Number((beforeRows as any)?.stake ?? 0);
     const beforeIsPrivate = Boolean((beforeRows as any)?.is_private ?? false);
@@ -174,7 +161,6 @@ export function useGoals() {
       throw error;
     }
 
-    // Social Pulse event when status changes (skip private goals)
     const isPrivateNow = updates.isPrivate ?? beforeIsPrivate;
     if (!isPrivateNow && updates.status && updates.status !== beforeStatus) {
       const action = updates.status === 'completed' ? 'completed' : updates.status === 'failed' ? 'failed' : null;
@@ -192,8 +178,14 @@ export function useGoals() {
       }
     }
 
-    await loadGoals();
+    await queryClient.invalidateQueries({ queryKey: queryKeys.goals(user.id) });
   };
 
-  return { goals, loading, addGoal, updateGoal, loadGoals };
+  return {
+    goals,
+    loading: query.isPending,
+    addGoal,
+    updateGoal,
+    loadGoals,
+  };
 }

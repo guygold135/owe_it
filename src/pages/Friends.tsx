@@ -1,167 +1,32 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { FriendCard } from '@/components/FriendCard';
-import { Friend } from '@/lib/types';
 import { supabase } from '@/integrations/supabase/client';
 import UserProfilePopover from '@/components/UserProfilePopover';
 import { useAuth } from '@/hooks/useAuth';
+import { useFriendsData } from '@/hooks/useFriendsData';
+import { queryKeys } from '@/lib/queryKeys';
+import type { ProfileLite } from '@/lib/fetchers/tabData';
 import { Check, Search, X } from 'lucide-react';
-
-type ProfileLite = {
-  id: string;
-  display_name: string;
-  avatar_url: string | null;
-  friend_code: string | null;
-};
-
-type IncomingRequest = {
-  id: string;
-  from_user_id: string;
-  created_at: string;
-  fromProfile?: ProfileLite | null;
-};
-
-type JudgeRequest = {
-  id: string;
-  requester_user_id: string;
-  created_at: string;
-  goal_payload: any;
-  requesterProfile?: ProfileLite | null;
-};
+import { FriendsPageSkeleton } from '@/components/PageSkeletons';
 
 export default function Friends() {
   const { user } = useAuth();
-  const [friends, setFriends] = useState<Friend[]>([]);
-  const [incoming, setIncoming] = useState<IncomingRequest[]>([]);
-  const [judgeRequests, setJudgeRequests] = useState<JudgeRequest[]>([]);
+  const queryClient = useQueryClient();
+  const { friends, incoming, loading } = useFriendsData();
   const [searchCode, setSearchCode] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchResult, setSearchResult] = useState<ProfileLite | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
-  useEffect(() => {
-    if (!user?.id) return;
-
-    const load = async () => {
-      // Friendships -> profiles
-      const { data: edges, error: edgesError } = await supabase
-        .from('friendships')
-        .select('friend_user_id, created_at')
-        .eq('user_id', user.id);
-
-      if (edgesError) {
-        console.error('Error loading friendships', edgesError);
-        setFriends([]);
-      } else {
-        const friendIds = (edges ?? []).map((e: any) => e.friend_user_id).filter(Boolean);
-        if (friendIds.length === 0) {
-          setFriends([]);
-        } else {
-          const { data: profiles, error: profilesError } = await supabase
-            .from('profiles')
-            .select('id, display_name, avatar_url')
-            .in('id', friendIds);
-
-          if (profilesError) {
-            console.error('Error loading friend profiles', profilesError);
-            setFriends([]);
-          } else {
-            const mapped: Friend[] = (profiles ?? []).map((p: any) => ({
-              id: p.id,
-              name: p.display_name ?? 'Friend',
-              avatar: p.avatar_url ?? '',
-              activeGoals: 0,
-              completedGoals: 0,
-              totalStaked: 0,
-            }));
-            mapped.sort((a, b) => a.name.localeCompare(b.name));
-            setFriends(mapped);
-          }
-        }
-      }
-
-      // Incoming friend requests
-      const { data: reqs, error: reqsError } = await supabase
-        .from('friend_requests')
-        .select('id, from_user_id, created_at, status')
-        .eq('to_user_id', user.id)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false });
-
-      if (reqsError) {
-        console.error('Error loading friend requests', reqsError);
-        setIncoming([]);
-      } else {
-        const fromIds = Array.from(new Set((reqs ?? []).map((r: any) => r.from_user_id).filter(Boolean)));
-        let profilesById = new Map<string, ProfileLite>();
-        if (fromIds.length > 0) {
-          const { data: fromProfiles } = await supabase
-            .from('profiles')
-            .select('id, display_name, avatar_url, friend_code')
-            .in('id', fromIds);
-          (fromProfiles ?? []).forEach((p: any) => {
-            profilesById.set(p.id, {
-              id: p.id,
-              display_name: p.display_name ?? '',
-              avatar_url: p.avatar_url ?? null,
-              friend_code: p.friend_code ?? null,
-            });
-          });
-        }
-
-        setIncoming(
-          (reqs ?? []).map((r: any) => ({
-            id: r.id,
-            from_user_id: r.from_user_id,
-            created_at: r.created_at,
-            fromProfile: profilesById.get(r.from_user_id) ?? null,
-          }))
-        );
-      }
-
-      // Incoming judge requests
-      const { data: jreqs, error: jreqsError } = await supabase
-        .from('judge_requests')
-        .select('id, requester_user_id, created_at, goal_payload, status')
-        .eq('judge_user_id', user.id)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false });
-
-      if (jreqsError) {
-        console.error('Error loading judge requests', jreqsError);
-        setJudgeRequests([]);
-      } else {
-        const requesterIds = Array.from(new Set((jreqs ?? []).map((r: any) => r.requester_user_id).filter(Boolean)));
-        let profilesById = new Map<string, ProfileLite>();
-        if (requesterIds.length > 0) {
-          const { data: fromProfiles } = await supabase
-            .from('profiles')
-            .select('id, display_name, avatar_url, friend_code')
-            .in('id', requesterIds);
-          (fromProfiles ?? []).forEach((p: any) => {
-            profilesById.set(p.id, {
-              id: p.id,
-              display_name: p.display_name ?? '',
-              avatar_url: p.avatar_url ?? null,
-              friend_code: p.friend_code ?? null,
-            });
-          });
-        }
-        setJudgeRequests(
-          (jreqs ?? []).map((r: any) => ({
-            id: r.id,
-            requester_user_id: r.requester_user_id,
-            created_at: r.created_at,
-            goal_payload: r.goal_payload,
-            requesterProfile: profilesById.get(r.requester_user_id) ?? null,
-          }))
-        );
-      }
-    };
-
-    load();
-  }, [user?.id]);
+  const invalidateFriends = () => {
+    if (user?.id) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.friends(user.id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pulse(user.id) });
+    }
+  };
 
   const normalizedSearchCode = useMemo(() => searchCode.replace(/\D/g, '').slice(0, 11), [searchCode]);
 
@@ -214,6 +79,7 @@ export default function Friends() {
     }
     setSearchResult(null);
     setSearchCode('');
+    invalidateFriends();
   };
 
   const accept = async (requestId: string) => {
@@ -222,33 +88,7 @@ export default function Friends() {
       console.error('Accept request error', error);
       return;
     }
-    setIncoming((prev) => prev.filter((r) => r.id !== requestId));
-    // Reload friends quickly by refetching friendships
-    if (user?.id) {
-      const { data: edges } = await supabase
-        .from('friendships')
-        .select('friend_user_id')
-        .eq('user_id', user.id);
-      const friendIds = (edges ?? []).map((e: any) => e.friend_user_id).filter(Boolean);
-      if (friendIds.length === 0) {
-        setFriends([]);
-      } else {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, display_name, avatar_url')
-          .in('id', friendIds);
-        const mapped: Friend[] = (profiles ?? []).map((p: any) => ({
-          id: p.id,
-          name: p.display_name ?? 'Friend',
-          avatar: p.avatar_url ?? '',
-          activeGoals: 0,
-          completedGoals: 0,
-          totalStaked: 0,
-        }));
-        mapped.sort((a, b) => a.name.localeCompare(b.name));
-        setFriends(mapped);
-      }
-    }
+    invalidateFriends();
   };
 
   const ignore = async (requestId: string) => {
@@ -257,25 +97,7 @@ export default function Friends() {
       console.error('Ignore request error', error);
       return;
     }
-    setIncoming((prev) => prev.filter((r) => r.id !== requestId));
-  };
-
-  const acceptJudge = async (requestId: string) => {
-    const { error } = await supabase.rpc('accept_judge_request', { p_request_id: requestId });
-    if (error) {
-      console.error('Accept judge request error', error);
-      return;
-    }
-    setJudgeRequests((prev) => prev.filter((r) => r.id !== requestId));
-  };
-
-  const ignoreJudge = async (requestId: string) => {
-    const { error } = await supabase.rpc('ignore_judge_request', { p_request_id: requestId });
-    if (error) {
-      console.error('Ignore judge request error', error);
-      return;
-    }
-    setJudgeRequests((prev) => prev.filter((r) => r.id !== requestId));
+    invalidateFriends();
   };
 
   return (
@@ -302,63 +124,10 @@ export default function Friends() {
       </div>
 
       <div className="px-6 space-y-4">
-        {/* Judge requests */}
-        {judgeRequests.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="p-5 rounded-[20px] bg-[#0f0f0f] border border-border"
-          >
-            <p className="text-xs uppercase tracking-widest text-muted-foreground">Judge requests</p>
-            <div className="mt-3 space-y-3">
-              {judgeRequests.map((r) => {
-                const payload = r.goal_payload ?? {};
-                const requesterName = r.requesterProfile?.display_name || 'Friend';
-                return (
-                  <div key={r.id} className="p-4 rounded-2xl bg-card border border-border">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm">
-                          <span className="font-semibold text-foreground">{requesterName}</span>{' '}
-                          <span className="text-muted-foreground">wants you to judge</span>{' '}
-                          <span className="font-medium text-foreground">"{payload.title ?? 'a goal'}"</span>
-                        </p>
-                        {payload.deadline && (
-                          <p className="text-xs text-muted-foreground mt-2 tabular-nums">
-                            deadline {new Date(payload.deadline).toLocaleString()}
-                          </p>
-                        )}
-                        <p className="text-xs text-muted-foreground mt-1 tabular-nums">
-                          stake ${Number(payload.stake ?? 0).toFixed(2)} · {payload.isPrivate ? 'private' : 'public'}
-                        </p>
-                        {payload.description && (
-                          <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{payload.description}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => void acceptJudge(r.id)}
-                          className="h-10 px-4 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 transition-colors text-emerald-400 font-display font-bold"
-                        >
-                          Accept
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void ignoreJudge(r.id)}
-                          className="h-10 px-4 rounded-xl bg-muted hover:bg-muted/80 transition-colors text-muted-foreground font-display font-bold"
-                        >
-                          Ignore
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </motion.div>
-        )}
-
+        {loading ? (
+          <FriendsPageSkeleton />
+        ) : (
+          <>
         {/* Add a friend by Friend ID */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
@@ -475,6 +244,8 @@ export default function Friends() {
         {friends.map((friend, i) => (
           <FriendCard key={friend.id} friend={friend} index={i} />
         ))}
+          </>
+        )}
       </div>
     </div>
   );

@@ -1,15 +1,24 @@
 import { NavLink, useLocation } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Target, Zap, Users, Plus, Scale } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { prefetchPath } from '@/lib/prefetchTabs';
 
 export function BottomNav({ onCreateGoal }: { onCreateGoal: () => void }) {
   const location = useLocation();
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   const navItems = [
     { to: '/', icon: Target, label: 'Goals' },
-    { to: '/my-judges', icon: Scale, label: 'My judges' },
+    { to: '/my-judges', icon: Scale, label: 'Goals I judge' },
     { to: '/pulse', icon: Zap, label: 'Pulse' },
     { to: '/friends', icon: Users, label: 'Friends' },
   ];
+
+  const warm = (path: string) => {
+    prefetchPath(queryClient, path, user?.id);
+  };
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-30 bg-card/90 backdrop-blur-xl border-t border-border">
@@ -20,6 +29,9 @@ export function BottomNav({ onCreateGoal }: { onCreateGoal: () => void }) {
             <NavLink
               key={item.to}
               to={item.to}
+              onMouseEnter={() => warm(item.to)}
+              onFocus={() => warm(item.to)}
+              onTouchStart={() => warm(item.to)}
               className="flex flex-col items-center gap-1 px-4 py-1"
             >
               <item.icon className={`w-5 h-5 transition-colors ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />

@@ -170,6 +170,57 @@ export type Database = {
         }
         Relationships: []
       }
+      goal_deadline_reminder_sent: {
+        Row: {
+          goal_id: string
+          threshold: string
+          sent_at: string
+        }
+        Insert: {
+          goal_id: string
+          threshold: string
+          sent_at?: string
+        }
+        Update: {
+          goal_id?: string
+          threshold?: string
+          sent_at?: string
+        }
+        Relationships: []
+      }
+      in_app_notifications: {
+        Row: {
+          id: string
+          user_id: string
+          kind: string
+          title: string
+          body: string
+          goal_id: string | null
+          read_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          kind: string
+          title: string
+          body: string
+          goal_id?: string | null
+          read_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          kind?: string
+          title?: string
+          body?: string
+          goal_id?: string | null
+          read_at?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -201,6 +252,14 @@ export type Database = {
       }
       cancel_judge_request: {
         Args: { p_request_id: string }
+        Returns: undefined
+      }
+      cancel_pending_judge_requests_before_cutoff: {
+        Args: { p_cutoff: string }
+        Returns: undefined
+      }
+      try_goal_deadline_reminders: {
+        Args: { p_goal_id: string }
         Returns: undefined
       }
     }

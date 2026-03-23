@@ -3,13 +3,19 @@ export interface Goal {
   title: string;
   description: string;
   stake: number;
+  stakeCurrency: string;
   deadline: Date;
   createdAt: Date;
+  /** Set when the goal is resolved (completed / failed); from DB `resolved_at`. */
+  resolvedAt: Date | null;
   status: 'active' | 'completed' | 'failed';
   judge: Judge;
   isPrivate: boolean;
   proof?: string;
 }
+
+/** Goal shown on "My judges" — includes creator info for cards */
+export type JudgeGoal = Goal & { creatorId: string; creatorName: string };
 
 export interface Judge {
   id: string;

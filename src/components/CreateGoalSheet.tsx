@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, CreditCard } from 'lucide-react';
+import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye } from 'lucide-react';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { useGoals } from '@/hooks/useGoals';
 import { useAuth } from '@/hooks/useAuth';
@@ -8,11 +9,50 @@ import { Goal, Judge, Friend } from '@/lib/types';
 import { supabase } from '@/integrations/supabase/client';
 import { stripePromise } from '@/lib/stripe';
 import { toast } from 'sonner';
+import { formatStakeAmount, USD_TO_CURRENCY_RATE } from '@/lib/currency';
+import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
+import { useShortDeadlineTesting } from '@/hooks/useShortDeadlineTesting';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { PublishButton, type PublishPhase } from '@/components/ui/publish-button';
+import { SuccessMorphIcon } from '@/components/ui/animated-state-icons';
 
 const steps = ['goal', 'stake', 'judge', 'card', 'confirm'] as const;
 
-const PRESET_STAKES = [0, 10, 25, 50, 75, 100, 150, 200] as const;
+const USD_BASE_PRESET_STAKES = [0, 10, 25, 50, 75, 100, 150, 200] as const;
 const STRIPE_MIN_DOLLARS = 1; // App minimum stake for paid goals
+/** Minimum time between "now" and deadline (must be strictly after this window). */
+const MIN_DEADLINE_LEAD_MS = 24 * 60 * 60 * 1000;
+
+function toDatetimeLocalString(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function getDeadlineValidationError(
+  deadlineDate: Date | null,
+  hasValue: boolean,
+  allowShortDeadlines: boolean,
+  now = Date.now(),
+): string | null {
+  if (!hasValue) return null;
+  if (!deadlineDate || Number.isNaN(deadlineDate.getTime())) return 'Please set a valid deadline.';
+  if (deadlineDate.getTime() <= now) return 'Choose a deadline in the future.';
+  if (!allowShortDeadlines && deadlineDate.getTime() <= now + MIN_DEADLINE_LEAD_MS) {
+    return 'Deadline must be more than 1 day from now.';
+  }
+  return null;
+}
+
+type CloseConfirmKind = 'judge-wait' | 'card' | 'sign';
 
 const CARD_ELEMENT_OPTIONS = {
   style: {
@@ -27,7 +67,54 @@ const CARD_ELEMENT_OPTIONS = {
   },
 };
 
-function CardStepForm({ onPaymentMethodReady }: { onPaymentMethodReady: (pmId: string) => void }) {
+function formatStakePresetAmount(amount: number, currency: string): string {
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: currency.toUpperCase(),
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+function getPowerOfTenPresetMultiplier(rate: number): number {
+  if (!Number.isFinite(rate) || rate <= 0) return 1;
+  // Choose nearest by linear distance to 1x / 10x / 100x / 1000x ...
+  // Example: rate 3.7 is closer to 1 than 10 => keep base presets.
+  const candidates = [1, 10, 100, 1000, 10000];
+  let best = 1;
+  let bestDiff = Math.abs(rate - 1);
+  for (const c of candidates) {
+    const diff = Math.abs(rate - c);
+    if (diff < bestDiff) {
+      best = c;
+      bestDiff = diff;
+    }
+  }
+  return best;
+}
+
+function buildPresetStakesForCurrency(currency: string): number[] {
+  const rate = USD_TO_CURRENCY_RATE[currency as keyof typeof USD_TO_CURRENCY_RATE] ?? 1;
+  const multiplier = getPowerOfTenPresetMultiplier(rate);
+  return USD_BASE_PRESET_STAKES.map((usdAmount) => usdAmount * multiplier);
+}
+
+function CardStepFields({ stake, stakeCurrency }: { stake: number; stakeCurrency: string }) {
+  return (
+    <div className="space-y-6 flex-1">
+      <p className="text-sm text-muted-foreground">
+        Your card will be charged {formatStakeAmount(stake, stakeCurrency)} if you don’t complete your goal by the
+        deadline.
+      </p>
+
+      <div className="p-4 bg-muted rounded-2xl">
+        <CardElement options={CARD_ELEMENT_OPTIONS} />
+      </div>
+    </div>
+  );
+}
+
+function CardStepContinueButton({ onPaymentMethodReady }: { onPaymentMethodReady: (pmId: string) => void }) {
   const stripe = useStripe();
   const elements = useElements();
 
@@ -64,30 +151,21 @@ function CardStepForm({ onPaymentMethodReady }: { onPaymentMethodReady: (pmId: s
   };
 
   return (
-    <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">
-        Your card will be charged if you don’t complete your goal by the deadline.
-      </p>
-
-      <div className="p-4 bg-muted rounded-2xl">
-        <CardElement options={CARD_ELEMENT_OPTIONS} />
-      </div>
-
-      <button
-        type="button"
-        onClick={handleContinue}
-        className="w-full py-4 rounded-[13px] bg-[#4ade80] text-[#022c22] font-display font-bold flex items-center justify-center gap-2 transition-transform transition-colors hover:bg-[#22c55e] active:scale-[0.98]"
-      >
-        <CreditCard className="w-5 h-5" />
-        Continue
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={handleContinue}
+      className="flex-1 py-4 rounded-2xl bg-primary text-primary-foreground font-display font-bold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+    >
+      Continue <ChevronRight className="w-4 h-4" />
+    </button>
   );
 }
 
 export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { addGoal, loadGoals } = useGoals();
+  const { addGoal, loadGoals, goals } = useGoals();
   const { user } = useAuth();
+  const { currency: stakeCurrency } = useStakeCurrencyPreference();
+  const { enabled: allowShortDeadlines } = useShortDeadlineTesting();
   const [step, setStep] = useState(0);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -98,18 +176,59 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const [paymentMethodId, setPaymentMethodId] = useState<string | null>(null);
   const [customStakeError, setCustomStakeError] = useState(false);
   const [customStakeInput, setCustomStakeInput] = useState('');
-  const [signing, setSigning] = useState(false);
-  const [signProgress, setSignProgress] = useState(0);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [judgeRequestId, setJudgeRequestId] = useState<string | null>(null);
   const [waitingJudgeName, setWaitingJudgeName] = useState<string | null>(null);
-  const signIntervalRef = useRef<number | null>(null);
+  const [confirmCloseKind, setConfirmCloseKind] = useState<CloseConfirmKind | null>(null);
+  /** Full-sheet overlay on sign step: spinner until API done, then success morph. */
+  const [signOverlayPhase, setSignOverlayPhase] = useState<'idle' | 'loading' | 'success'>('idle');
+  const judgeRequestIdRef = useRef<string | null>(null);
+  const stakeRef = useRef(stake);
+  /** judge-wait dialog: full sheet close (X/backdrop) vs return to judge picker (Back button) */
+  const judgeWaitDismissRef = useRef<'sheet' | 'back-to-picker'>('sheet');
+
+  useEffect(() => {
+    judgeRequestIdRef.current = judgeRequestId;
+  }, [judgeRequestId]);
+
+  useEffect(() => {
+    stakeRef.current = stake;
+  }, [stake]);
+
+  useEffect(() => {
+    if (step !== 4) setSignOverlayPhase('idle');
+  }, [step]);
 
   const deadlineDate = useMemo(() => {
     if (!deadline) return null;
     const d = new Date(deadline);
     return Number.isNaN(d.getTime()) ? null : d;
   }, [deadline]);
+
+  const deadlineIssue = useMemo(
+    () => getDeadlineValidationError(deadlineDate, deadline.length > 0, allowShortDeadlines),
+    [deadline, deadlineDate, allowShortDeadlines],
+  );
+
+  /** Earliest `datetime-local` value (now + 1 day + 1min, rounded) so the native picker matches validation. */
+  const minDeadlineInput = useMemo(() => {
+    const minLeadMs = allowShortDeadlines ? 60 * 1000 : MIN_DEADLINE_LEAD_MS + 60 * 1000;
+    const d = new Date(Date.now() + minLeadMs);
+    d.setSeconds(0, 0);
+    return toDatetimeLocalString(d);
+  }, [open, deadline, allowShortDeadlines]);
+
+  /** Same title as another active goal (same account), case-insensitive, trimmed */
+  const duplicateActiveTitle = useMemo(() => {
+    const t = title.trim().toLowerCase();
+    if (!t) return false;
+    return goals.some((g) => g.status === 'active' && g.title.trim().toLowerCase() === t);
+  }, [title, goals]);
+
+  const presetStakes = useMemo(
+    () => buildPresetStakesForCurrency(stakeCurrency),
+    [stakeCurrency],
+  );
 
   useEffect(() => {
     const loadFriends = async () => {
@@ -160,7 +279,11 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   useEffect(() => {
     if (!judgeRequestId) return;
 
-    // Poll fallback (in case realtime isn't enabled for this table yet)
+    /**
+     * Poll: never clear state on !data — that races realtime and tears down the channel before
+     * UPDATE/DELETE events arrive (accept used to be UPDATE+DELETE in one tx; poll saw the row gone first).
+     * Unfiltered postgres_changes + client filter: filtered UUID subscriptions are unreliable in Supabase.
+     */
     const poll = window.setInterval(async () => {
       try {
         const { data, error } = await supabase
@@ -169,12 +292,21 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
           .eq('id', judgeRequestId)
           .maybeSingle();
         if (error) return;
-        const status = (data as any)?.status as string | undefined;
+        if (!data) return;
+        const status = (data as { status?: string })?.status;
         if (status === 'accepted') {
           setJudgeRequestId(null);
           setWaitingJudgeName(null);
-          setStep(stake > 0 ? 3 : 4);
-        } else if (status === 'ignored' || status === 'cancelled') {
+          setStep(stakeRef.current > 0 ? 3 : 4);
+          return;
+        }
+        if (status === 'ignored') {
+          setJudgeRequestId(null);
+          setWaitingJudgeName(null);
+          toast.error('Judge request was ignored.');
+          return;
+        }
+        if (status === 'cancelled') {
           setJudgeRequestId(null);
           setWaitingJudgeName(null);
         }
@@ -191,46 +323,129 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
           event: 'UPDATE',
           schema: 'public',
           table: 'judge_requests',
-          filter: `id=eq.${judgeRequestId}`,
         },
         (payload) => {
-          const status = (payload.new as any)?.status as string | undefined;
+          const row = payload.new as { id?: string; status?: string };
+          if (row.id !== judgeRequestIdRef.current) return;
+          const status = row.status;
           if (status === 'accepted') {
             setJudgeRequestId(null);
             setWaitingJudgeName(null);
-            // Move forward automatically
-            setStep(stake > 0 ? 3 : 4);
-          } else if (status === 'ignored' || status === 'cancelled') {
+            setStep(stakeRef.current > 0 ? 3 : 4);
+            return;
+          }
+          if (status === 'ignored') {
             setJudgeRequestId(null);
             setWaitingJudgeName(null);
-            toast.error(status === 'ignored' ? 'Judge request was ignored.' : 'Judge request was cancelled.');
+            toast.error('Judge request was ignored.');
+            return;
           }
-        }
+          if (status === 'cancelled') {
+            setJudgeRequestId(null);
+            setWaitingJudgeName(null);
+          }
+        },
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'judge_requests',
+        },
+        (payload) => {
+          const oldRow = payload.old as { id?: string; status?: string } | undefined;
+          if (oldRow?.id !== judgeRequestIdRef.current) return;
+          if (oldRow.status === 'accepted') {
+            setJudgeRequestId(null);
+            setWaitingJudgeName(null);
+            setStep(stakeRef.current > 0 ? 3 : 4);
+            return;
+          }
+          if (oldRow.status === 'pending') {
+            setJudgeRequestId(null);
+            setWaitingJudgeName(null);
+            // e.g. cancel_pending_judge_requests_before_cutoff DELETE — silent
+          }
+        },
+      )
+      .subscribe((status, err) => {
+        if (status === 'CHANNEL_ERROR' && err) {
+          console.warn('Judge request realtime channel error', err);
+        }
+      });
 
     return () => {
       window.clearInterval(poll);
       void supabase.removeChannel(channel);
     };
-  }, [judgeRequestId, stake]);
+  }, [judgeRequestId]);
 
   const reset = () => {
     setStep(0); setTitle(''); setDescription(''); setStake(0);
     setDeadline(''); setJudge(null); setIsPrivate(false);
     setPaymentMethodId(null); setCustomStakeInput(''); setCustomStakeError(false);
-    setSigning(false); setSignProgress(0);
     setJudgeRequestId(null); setWaitingJudgeName(null);
-    if (signIntervalRef.current !== null) {
-      clearInterval(signIntervalRef.current);
-      signIntervalRef.current = null;
-    }
+    setConfirmCloseKind(null);
+    setSignOverlayPhase('idle');
   };
 
-  const handleClose = () => { reset(); onClose(); };
+  /** Closing the sheet = abandoning goal creation → cancel pending judge request for the judge */
+  useEffect(() => {
+    if (open) return;
+    const pendingId = judgeRequestIdRef.current;
+    if (pendingId) {
+      void supabase.rpc('cancel_judge_request', { p_request_id: pendingId }).then(({ error }) => {
+        if (error) console.error('Cancel judge request on close', error);
+      });
+    }
+    reset();
+  }, [open]);
+
+  const handleClose = () => {
+    onClose();
+  };
+
+  /** Close / backdrop: confirm first on judge wait, card step, or sign step */
+  const requestClose = () => {
+    if (confirmCloseKind !== null) return;
+    if (judgeRequestId) {
+      judgeWaitDismissRef.current = 'sheet';
+      setConfirmCloseKind('judge-wait');
+      return;
+    }
+    if (step === 3) {
+      setConfirmCloseKind('card');
+      return;
+    }
+    if (step === 4) {
+      setConfirmCloseKind('sign');
+      return;
+    }
+    onClose();
+  };
+
+  const confirmCloseDialog = () => {
+    if (confirmCloseKind === 'judge-wait' && judgeWaitDismissRef.current === 'back-to-picker') {
+      flushSync(() => setConfirmCloseKind(null));
+      const id = judgeRequestIdRef.current;
+      if (id) {
+        void supabase.rpc('cancel_judge_request', { p_request_id: id }).then(({ error }) => {
+          if (error) console.error('Cancel judge request error', error);
+        });
+      }
+      setJudgeRequestId(null);
+      setWaitingJudgeName(null);
+      return;
+    }
+    flushSync(() => setConfirmCloseKind(null));
+    onClose();
+  };
 
   const canNext = () => {
-    if (step === 0) return title.length > 0 && deadline.length > 0;
+    if (step === 0) {
+      return title.length > 0 && deadline.length > 0 && !duplicateActiveTitle && !deadlineIssue;
+    }
     if (step === 1) {
       if (customStakeInput.trim() !== '' && customStakeError) return false;
       return true;
@@ -241,6 +456,18 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   };
 
   const goNext = () => {
+    if (step === 0) {
+      const err = getDeadlineValidationError(deadlineDate, deadline.length > 0, allowShortDeadlines);
+      if (err) {
+        toast.error(err);
+        return;
+      }
+      const t = title.trim().toLowerCase();
+      if (goals.some((g) => g.status === 'active' && g.title.trim().toLowerCase() === t)) {
+        toast.error('You already have an active goal with this name. Use a different title.');
+        return;
+      }
+    }
     if (step === 1) {
       const raw = customStakeInput.trim();
       if (raw !== '') {
@@ -261,8 +488,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
         // Send judge request and wait for acceptance
         (async () => {
           if (!user?.id) return;
-          if (!deadlineDate) {
-            toast.error('Please set a valid deadline.');
+          const deadlineErr = getDeadlineValidationError(deadlineDate, deadline.length > 0, allowShortDeadlines);
+          if (deadlineErr) {
+            toast.error(deadlineErr);
             return;
           }
           try {
@@ -271,6 +499,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               title,
               description,
               stake,
+              stakeCurrency,
               deadline: deadlineDate.toISOString(),
               isPrivate,
             };
@@ -301,6 +530,10 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   };
 
   const goBack = () => {
+    if (step === 4) {
+      setStep(stake > 0 ? 3 : 2);
+      return;
+    }
     // From card go back to judge
     if (step === 3) {
       setStep(2);
@@ -309,113 +542,95 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     setStep((s) => s - 1);
   };
 
-  const handleSign = () => {
-    if (signIntervalRef.current !== null) return;
+  const performSign = async () => {
+    const signDeadlineErr = getDeadlineValidationError(deadlineDate, deadline.length > 0, allowShortDeadlines);
+    if (signDeadlineErr) {
+      toast.error(signDeadlineErr);
+      throw new Error(signDeadlineErr);
+    }
 
-    setSigning(true);
-    let progress = 0;
-    const interval = window.setInterval(() => {
-      progress += 1;
-      setSignProgress(Math.min(progress, 100));
-      if (progress >= 100) {
-        clearInterval(interval);
-        signIntervalRef.current = null;
-        (async () => {
-          try {
-            const amountInCents = Math.round(stake * 100);
+    const amountInCents = Math.round(stake * 100);
 
-            if (stake === 0) {
-              const newGoal: Goal = {
-                id: Date.now().toString(),
-                title,
-                description,
-                stake: 0,
-                deadline: new Date(deadline),
-                createdAt: new Date(),
-                status: 'active',
-                judge: judge!,
-                isPrivate,
-              };
-              await addGoal(newGoal);
-              toast.success('Goal created.');
-              handleClose();
-              return;
-            }
+    if (stake === 0) {
+      const newGoal: Goal = {
+        id: Date.now().toString(),
+        title,
+        description,
+        stake: 0,
+        stakeCurrency,
+        deadline: new Date(deadline),
+        createdAt: new Date(),
+        resolvedAt: null,
+        status: 'active',
+        judge: judge!,
+        isPrivate,
+      };
+      await addGoal(newGoal);
+      return;
+    }
 
-            if (!paymentMethodId || !user?.id) {
-              toast.error('Payment method or user missing.');
-              setSigning(false);
-              setSignProgress(0);
-              return;
-            }
+    if (!paymentMethodId || !user?.id) {
+      toast.error('Payment method or user missing.');
+      throw new Error('Payment method or user missing.');
+    }
 
-            const { data, error } = await supabase.functions.invoke('create-checkout', {
-              body: {
-                paymentMethodId,
-                userId: user.id,
-                goalTitle: title,
-                description,
-                deadline: new Date(deadline).toISOString(),
-                judgeName: judge?.isSelf ? null : judge?.name,
-                judgeUserId: judge?.isSelf ? user.id : judge?.id,
-                isPrivate,
-                amount: amountInCents,
-              },
-            });
+    const { data, error } = await supabase.functions.invoke('create-checkout', {
+      body: {
+        paymentMethodId,
+        userId: user.id,
+        goalTitle: title,
+        description,
+        deadline: new Date(deadline).toISOString(),
+        judgeName: judge?.isSelf ? null : judge?.name,
+        judgeUserId: judge?.isSelf ? user.id : judge?.id,
+        isPrivate,
+        amount: amountInCents,
+        currency: stakeCurrency,
+      },
+    });
 
-            if (error) {
-              console.error('Error charging card', error);
-              toast.error(data?.error ?? 'Could not charge card. Goal was not created.');
-              setSigning(false);
-              setSignProgress(0);
-              return;
-            }
+    if (error) {
+      console.error('Error charging card', error);
+      toast.error(data?.error ?? 'Could not charge card. Goal was not created.');
+      throw new Error('checkout');
+    }
 
-            const payload = data as any;
-            if (!payload?.success) {
-              toast.error(payload?.error ?? 'Payment failed. Goal was not created.');
-              setSigning(false);
-              setSignProgress(0);
-              return;
-            }
+    const payload = data as { success?: boolean; error?: string; goalId?: string };
+    if (!payload?.success) {
+      toast.error(payload?.error ?? 'Payment failed. Goal was not created.');
+      throw new Error('payment failed');
+    }
 
-            toast.success('Goal created and payment successful.');
-            // Social Pulse event (friends feed)
-            try {
-              if (!isPrivate) {
-                await supabase.from('pulse_events').insert({
-                  user_id: user.id,
-                  action: stake > 0 ? 'staked' : 'created',
-                  goal_title: title,
-                  stake,
-                } as any);
-              }
-            } catch (e) {
-              console.error('Error inserting pulse event', e);
-            }
-            await loadGoals();
-            handleClose();
-          } catch (err: any) {
-            console.error('Unexpected error', err);
-            toast.error(err?.message ?? 'Something went wrong. Goal was not created.');
-            setSigning(false);
-            setSignProgress(0);
-          }
-        })();
+    // Best effort: make sure currency is persisted on the created goal, even if
+    // edge function deployment lags behind frontend changes.
+    if (payload.goalId) {
+      const { error: currencyError } = await supabase
+        .from('goals')
+        .update({ stake_currency: stakeCurrency })
+        .eq('id', payload.goalId)
+        .eq('user_id', user.id);
+      if (currencyError) {
+        const message = String((currencyError as { message?: unknown })?.message ?? '').toLowerCase();
+        if (!message.includes('stake_currency')) {
+          console.error('Error saving goal currency', currencyError);
+        }
       }
-    }, 30);
-    signIntervalRef.current = interval;
-  };
+    }
 
-  const handleSignEnd = () => {
-    if (signIntervalRef.current !== null) {
-      clearInterval(signIntervalRef.current);
-      signIntervalRef.current = null;
+    try {
+      if (!isPrivate) {
+        await supabase.from('pulse_events').insert({
+          user_id: user.id,
+          action: stake > 0 ? 'staked' : 'created',
+          goal_title: title,
+          stake,
+        } as any);
+      }
+    } catch (e) {
+      console.error('Error inserting pulse event', e);
     }
-    if (signProgress < 100) {
-      setSigning(false);
-      setSignProgress(0);
-    }
+    await loadGoals();
+    toast.success('Goal created and payment successful.');
   };
 
   return (
@@ -427,8 +642,62 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40"
-            onClick={handleClose}
+            onClick={requestClose}
           />
+          <AlertDialog
+            open={confirmCloseKind !== null}
+            onOpenChange={(next) => {
+              if (!next) setConfirmCloseKind(null);
+            }}
+          >
+            <AlertDialogContent className="max-w-md mx-4 rounded-2xl border-border">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="font-display">
+                  {confirmCloseKind === 'judge-wait' && 'Cancel this judge request?'}
+                  {confirmCloseKind === 'card' && 'Leave card details?'}
+                  {confirmCloseKind === 'sign' && 'Leave before signing?'}
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-left text-muted-foreground">
+                  {confirmCloseKind === 'judge-wait' && (
+                    <>
+                      {waitingJudgeName
+                        ? `${waitingJudgeName} hasn’t responded yet. `
+                        : 'Your friend hasn’t responded yet. '}
+                      If you leave now, the request will be cancelled and they won’t see it anymore.
+                    </>
+                  )}
+                  {confirmCloseKind === 'card' && (
+                    <>
+                      Your card will be charged only if you complete the goal by the deadline—but you haven’t finished this step yet.
+                      If you leave now, you’ll need to add your payment method again to create this goal.
+                    </>
+                  )}
+                  {confirmCloseKind === 'sign' && (
+                    <>
+                      You haven’t signed the contract yet. If you leave now, this goal won’t be created and you’ll lose this
+                      progress.
+                    </>
+                  )}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="gap-2 sm:gap-0">
+                <AlertDialogCancel className="rounded-xl font-display font-semibold mt-0">
+                  {confirmCloseKind === 'judge-wait' && 'Keep waiting'}
+                  {confirmCloseKind === 'card' && 'Keep card step'}
+                  {confirmCloseKind === 'sign' && 'Keep signing'}
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={confirmCloseDialog}
+                  className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 font-display font-bold"
+                >
+                  {confirmCloseKind === 'judge-wait' && 'Yes, cancel request'}
+                  {confirmCloseKind === 'card' && 'Yes, leave'}
+                  {confirmCloseKind === 'sign' && 'Yes, leave'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
           <motion.div
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
@@ -446,7 +715,12 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                   {step === 3 && 'Card details'}
                   {step === 4 && 'Sign the Contract'}
                 </h2>
-                <button onClick={handleClose} className="p-2 rounded-xl hover:bg-muted transition-colors">
+                <button
+                  type="button"
+                  onClick={requestClose}
+                  className="p-2 rounded-xl hover:bg-muted transition-colors"
+                  aria-label="Close"
+                >
                   <X className="w-5 h-5 text-muted-foreground" />
                 </button>
               </div>
@@ -468,7 +742,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
               {/* Step 0: Goal */}
               {step === 0 && (
-                <div className="space-y-5 flex-1">
+                <div className="flex flex-col gap-5 flex-1">
                   <div>
                     <label className="text-xs uppercase tracking-widest text-muted-foreground mb-2 block">Goal Title</label>
                     <input
@@ -476,8 +750,13 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       value={title}
                       onChange={e => setTitle(e.target.value)}
                       placeholder="e.g., Finish Portfolio"
-                      className="w-full bg-muted rounded-2xl px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary font-display text-lg"
+                      className="block w-full bg-muted rounded-2xl px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary font-display text-lg"
                     />
+                    {duplicateActiveTitle && (
+                      <p className="text-xs text-destructive mt-2">
+                        You already have an active goal with this name. Choose a different title to continue.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="text-xs uppercase tracking-widest text-muted-foreground mb-2 block">Description (optional)</label>
@@ -486,7 +765,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       onChange={e => setDescription(e.target.value)}
                       placeholder="What exactly needs to get done?"
                       rows={3}
-                      className="w-full bg-muted rounded-2xl px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                      className="block w-full bg-muted rounded-2xl px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                     />
                   </div>
                   <div>
@@ -494,9 +773,16 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     <input
                       type="datetime-local"
                       value={deadline}
+                      min={minDeadlineInput}
                       onChange={e => setDeadline(e.target.value)}
-                      className="w-full bg-muted rounded-2xl px-5 py-4 text-foreground focus:outline-none focus:ring-2 focus:ring-primary [color-scheme:dark]"
+                      aria-invalid={deadlineIssue ? true : undefined}
+                      className={`block w-full bg-muted rounded-2xl px-5 py-4 text-foreground focus:outline-none focus:ring-2 [color-scheme:dark] ${
+                        deadlineIssue ? 'ring-2 ring-destructive focus:ring-destructive' : 'focus:ring-primary'
+                      }`}
                     />
+                    {deadlineIssue && (
+                      <p className="text-xs text-destructive mt-2">{deadlineIssue}</p>
+                    )}
                   </div>
                   <div className="flex items-center justify-between p-4 bg-muted rounded-2xl">
                     <div className="flex items-center gap-3">
@@ -525,7 +811,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       transition={{ duration: 0.2 }}
                       className="text-6xl font-display font-extrabold text-primary tabular-nums tracking-tighter"
                     >
-                      ${stake.toFixed(2)}
+                      {formatStakeAmount(stake, stakeCurrency)}
                     </motion.div>
                     <p className="text-sm text-muted-foreground mt-4">
                       Put money on the line!
@@ -534,7 +820,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     </p>
                   </div>
                   <div className="grid grid-cols-4 gap-2">
-                    {PRESET_STAKES.map(amount => (
+                    {presetStakes.map(amount => (
                       <button
                         key={amount}
                         type="button"
@@ -548,7 +834,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                             : 'bg-muted text-muted-foreground hover:bg-muted/80'
                         }`}
                       >
-                        {amount === 0 ? 'Free' : `$${amount}`}
+                        {amount === 0 ? 'Free' : formatStakePresetAmount(amount, stakeCurrency)}
                       </button>
                     ))}
                   </div>
@@ -557,11 +843,11 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       Or custom amount
                     </label>
                     <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground font-display">$</span>
+                      <span className="text-muted-foreground font-display">{stakeCurrency.toUpperCase()}</span>
                       <input
                         type="text"
                         inputMode="decimal"
-                        value={customStakeInput || (PRESET_STAKES.includes(stake as typeof PRESET_STAKES[number]) ? '' : stake.toString())}
+                        value={customStakeInput || (presetStakes.includes(stake) ? '' : stake.toString())}
                         onChange={(e) => {
                           const v = e.target.value;
                           setCustomStakeInput(v);
@@ -595,7 +881,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                             return;
                           }
                           if (num > 0 && num < STRIPE_MIN_DOLLARS) {
-                            toast.error(`Minimum charge is $${STRIPE_MIN_DOLLARS.toFixed(2)} (Stripe requirement).`);
+                            toast.error(
+                              `Minimum charge is ${formatStakeAmount(STRIPE_MIN_DOLLARS, stakeCurrency)} (Stripe requirement).`,
+                            );
                             setCustomStakeInput('');
                             setStake(0);
                             return;
@@ -611,43 +899,45 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         }`}
                       />
                     </div>
-                    <p className="text-xs text-muted-foreground">Minimum $1 for a stake.</p>
+                    <p className="text-xs text-muted-foreground">
+                      Minimum {formatStakeAmount(STRIPE_MIN_DOLLARS, stakeCurrency)} for a stake.
+                    </p>
                   </div>
                 </div>
               )}
 
               {/* Step 2: Judge */}
               {step === 2 && (
-                <div className="space-y-4 flex-1">
+                <div className="flex min-h-0 flex-1 flex-col">
                   {judgeRequestId && (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
-                      <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mb-4">
-                        <Users className="w-5 h-5 text-emerald-400" />
+                    <>
+                      <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+                        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10">
+                          <Users className="h-5 w-5 text-emerald-400" />
+                        </div>
+                        <p className="font-display font-semibold text-sm text-foreground">
+                          waiting for {waitingJudgeName ?? 'your friend'} to accept
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          They’ll see your goal details and can accept or ignore.
+                        </p>
                       </div>
-                      <p className="text-sm text-foreground font-display font-semibold">
-                        waiting for {waitingJudgeName ?? 'your friend'} to accept
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        They’ll see your goal details and can accept or ignore.
-                      </p>
                       <button
                         type="button"
-                        onClick={async () => {
-                          if (!judgeRequestId) return;
-                          const { error } = await supabase.rpc('cancel_judge_request', { p_request_id: judgeRequestId });
-                          if (error) console.error('Cancel judge request error', error);
-                          setJudgeRequestId(null);
-                          setWaitingJudgeName(null);
+                        onClick={() => {
+                          if (confirmCloseKind !== null) return;
+                          judgeWaitDismissRef.current = 'back-to-picker';
+                          setConfirmCloseKind('judge-wait');
                         }}
-                        className="mt-6 w-full py-3 rounded-2xl bg-muted text-muted-foreground font-display font-semibold"
+                        className="mt-auto w-full shrink-0 py-3 rounded-2xl bg-muted font-display font-semibold text-muted-foreground"
                       >
                         Back
                       </button>
-                    </div>
+                    </>
                   )}
 
                   {!judgeRequestId && (
-                    <>
+                    <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto">
                       {/* Self judge option */}
                       <button
                         onClick={() => setJudge({ id: 'self', name: 'You', avatar: '', isSelf: true })}
@@ -694,31 +984,54 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                           </button>
                         ))}
                       </div>
-                    </>
+                    </div>
                   )}
                 </div>
               )}
 
               {/* Step 3: Card details (only when stake > 0) */}
-              {step === 3 && (
-                <div className="space-y-6 flex-1">
-                  {stripePromise && (
-                    <Elements stripe={stripePromise}>
-                      <CardStepForm
+              {step === 3 && stripePromise && (
+                <Elements stripe={stripePromise}>
+                  <div className="flex flex-col flex-1 min-h-0">
+                    <CardStepFields stake={stake} stakeCurrency={stakeCurrency} />
+                    <div className="flex gap-3 mt-8">
+                      <button
+                        type="button"
+                        onClick={goBack}
+                        className="flex-1 py-4 rounded-2xl bg-muted text-muted-foreground font-display font-semibold"
+                      >
+                        Back
+                      </button>
+                      <CardStepContinueButton
                         onPaymentMethodReady={(id) => {
                           setPaymentMethodId(id);
                           setStep(4);
                         }}
                       />
-                    </Elements>
-                  )}
-                </div>
+                    </div>
+                  </div>
+                </Elements>
               )}
 
               {/* Step 4: Confirm */}
               {step === 4 && (
-                <div className="space-y-6">
-                  <div className="p-6 rounded-[24px] bg-muted space-y-4">
+                <div className="relative flex min-h-0 flex-1 flex-col">
+                  {signOverlayPhase !== 'idle' && (
+                    <div
+                      className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 rounded-2xl bg-background/90 px-6 backdrop-blur-md"
+                      aria-live="polite"
+                    >
+                      <SuccessMorphIcon
+                        phase={signOverlayPhase === 'loading' ? 'loading' : 'success'}
+                        size={56}
+                        className="text-primary"
+                      />
+                      <p className="text-center text-sm text-muted-foreground">
+                        {signOverlayPhase === 'loading' ? 'Creating your goal…' : 'You’re all set!'}
+                      </p>
+                    </div>
+                  )}
+                  <div className="shrink-0 rounded-[24px] bg-muted p-6 space-y-4">
                     <div className="flex justify-between">
                       <span className="text-xs uppercase tracking-widest text-muted-foreground">Goal</span>
                       <span className="text-sm text-foreground font-medium">{title}</span>
@@ -729,7 +1042,15 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     </div>
                     <div className="flex justify-between">
                       <span className="text-xs uppercase tracking-widest text-muted-foreground">Stake</span>
-                      <span className="text-sm text-primary font-display font-bold tabular-nums">${stake.toFixed(2)}</span>
+                      <span
+                        className={
+                          stake === 0
+                            ? 'text-sm text-foreground font-medium'
+                            : 'text-sm text-primary font-display font-bold tabular-nums'
+                        }
+                      >
+                        {formatStakeAmount(stake, stakeCurrency)}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-xs uppercase tracking-widest text-muted-foreground">Judge</span>
@@ -741,30 +1062,44 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     </div>
                   </div>
 
-                  {/* Long press to sign */}
-                  <div className="relative">
-                    <motion.button
-                      onMouseDown={handleSign}
-                      onMouseUp={handleSignEnd}
-                      onMouseLeave={handleSignEnd}
-                      onTouchStart={handleSign}
-                      onTouchEnd={handleSignEnd}
-                      className="w-full py-6 bg-primary text-primary-foreground rounded-2xl font-display font-bold text-lg glow-primary relative overflow-hidden"
+                  <div className="mt-auto flex shrink-0 gap-3 pt-6">
+                    <button
+                      type="button"
+                      onClick={goBack}
+                      className="flex-1 rounded-2xl bg-muted py-4 font-display font-semibold text-muted-foreground"
                     >
-                      <div
-                        className="absolute inset-0 bg-primary-foreground/20"
-                        style={{ width: `${signProgress}%`, transition: 'width 10ms linear' }}
-                      />
-                      <span className="relative z-10">
-                        {signing ? 'SIGNING...' : `HOLD TO SIGN — $${stake.toFixed(2)}`}
-                      </span>
-                    </motion.button>
-                    <p className="text-xs text-muted-foreground text-center mt-3">Hold for 3 seconds to commit</p>
+                      Back
+                    </button>
+                    <PublishButton
+                      progressStyle="fill"
+                      holdDuration={2000}
+                      progressTickMs={30}
+                      labels={{
+                        idle: 'Create goal',
+                        holding: 'Sure?',
+                      }}
+                      onBeforeHold={() => {
+                        const err = getDeadlineValidationError(deadlineDate, deadline.length > 0, allowShortDeadlines);
+                        if (err) {
+                          toast.error(err);
+                          return false;
+                        }
+                        return true;
+                      }}
+                      onPublish={performSign}
+                      onSuccess={handleClose}
+                      onPhaseChange={(p: PublishPhase) => {
+                        if (p === 'publishing') setSignOverlayPhase('loading');
+                        else if (p === 'success') setSignOverlayPhase('success');
+                        else setSignOverlayPhase('idle');
+                      }}
+                      className="min-w-0 flex-1"
+                    />
                   </div>
                 </div>
               )}
 
-              {/* Navigation: hide on card step (has its own button) and on confirm */}
+              {/* Navigation: hide on card & confirm (those steps use Back + primary in a row) */}
               {step < 4 && step !== 3 && !(step === 2 && Boolean(judgeRequestId)) && (
                 <div className="flex gap-3 mt-8">
                   {step > 0 && (
@@ -783,17 +1118,6 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     className="flex-1 py-4 rounded-2xl bg-primary text-primary-foreground font-display font-bold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     Continue <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-              {step === 3 && (
-                <div className="mt-8">
-                  <button
-                    type="button"
-                    onClick={goBack}
-                    className="w-full py-4 rounded-[13px] bg-transparent text-muted-foreground font-display font-semibold"
-                  >
-                    Back
                   </button>
                 </div>
               )}

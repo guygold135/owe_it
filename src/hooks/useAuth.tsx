@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 type AuthUser = {
@@ -7,13 +7,28 @@ type AuthUser = {
   displayName?: string;
 };
 
-export function useAuth() {
+type AuthContextValue = {
+  user: AuthUser | null;
+  loading: boolean;
+  signUp: (email: string, password: string, displayName?: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
+};
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+function useProvideAuth(): AuthContextValue {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const ensuredProfileForUserRef = useRef<string | null>(null);
 
   useEffect(() => {
+    let alive = true;
+
     const ensureProfile = async (u: any | null) => {
       if (!u?.id) return;
+      if (ensuredProfileForUserRef.current === u.id) return;
+      ensuredProfileForUserRef.current = u.id;
       const displayName =
         u.user_metadata?.display_name ||
         u.raw_user_meta_data?.display_name ||
@@ -49,18 +64,37 @@ export function useAuth() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!alive) return;
       setUser(mapUser(session?.user ?? null));
       void ensureProfile(session?.user ?? null);
       setLoading(false);
     });
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(mapUser(session?.user ?? null));
-      void ensureProfile(session?.user ?? null);
-      setLoading(false);
-    });
+    const getSessionWithTimeout = async () => {
+      try {
+        const result = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<never>((_, reject) => {
+            window.setTimeout(() => reject(new Error('getSession timeout')), 6000);
+          }),
+        ]);
+        if (!alive) return;
+        const session = (result as Awaited<ReturnType<typeof supabase.auth.getSession>>).data.session;
+        setUser(mapUser(session?.user ?? null));
+        void ensureProfile(session?.user ?? null);
+      } catch (err) {
+        if (!alive) return;
+        console.error('Auth bootstrap error', err);
+        setUser(null);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
+
+    void getSessionWithTimeout();
 
     return () => {
+      alive = false;
       subscription.unsubscribe();
     };
   }, []);
@@ -113,6 +147,22 @@ export function useAuth() {
     if (error) throw error;
   };
 
-  return { user, loading, signUp, signIn, signOut };
+  return useMemo(
+    () => ({ user, loading, signUp, signIn, signOut }),
+    [user, loading],
+  );
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const value = useProvideAuth();
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return ctx;
 }
 

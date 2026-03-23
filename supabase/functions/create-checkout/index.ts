@@ -17,6 +17,60 @@ const corsHeaders: Record<string, string> = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+const supportedCurrencies = new Set([
+  "usd",
+  "eur",
+  "gbp",
+  "cad",
+  "aud",
+  "nzd",
+  "chf",
+  "sek",
+  "nok",
+  "dkk",
+  "pln",
+  "czk",
+  "huf",
+  "ron",
+  "bgn",
+  "hrk",
+  "isk",
+  "try",
+  "ils",
+  "aed",
+  "sar",
+  "qar",
+  "bhd",
+  "omr",
+  "jod",
+  "egp",
+  "mad",
+  "zar",
+  "kes",
+  "ngn",
+  "inr",
+  "pkr",
+  "bdt",
+  "lkr",
+  "thb",
+  "myr",
+  "sgd",
+  "hkd",
+  "jpy",
+  "twd",
+  "krw",
+  "vnd",
+  "php",
+  "idr",
+  "brl",
+  "mxn",
+  "ars",
+  "clp",
+  "cop",
+  "pen",
+  "uyu",
+]);
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -74,7 +128,13 @@ serve(async (req: Request): Promise<Response> => {
         judgeUserId,
         isPrivate,
         amount: amountInCents,
+        currency,
       } = body;
+
+      const normalizedCurrency =
+        typeof currency === "string" && supportedCurrencies.has(currency.toLowerCase())
+          ? currency.toLowerCase()
+          : "usd";
 
       if (
         !paymentMethodId ||
@@ -103,7 +163,7 @@ serve(async (req: Request): Promise<Response> => {
 
       const paymentIntent = await stripe.paymentIntents.create({
         amount: amountInCents,
-        currency: "usd",
+        currency: normalizedCurrency,
         payment_method: paymentMethodId,
         confirm: true,
         capture_method: "manual",
@@ -133,21 +193,53 @@ serve(async (req: Request): Promise<Response> => {
           judge_name: judgeName ?? null,
           judge_user_id: judgeUserId ?? null,
           is_private: !!isPrivate,
+          stake_currency: normalizedCurrency,
           payment_intent_id: paymentIntent.id,
           payment_status: "authorized",
         })
         .select("id")
         .single();
 
+      let goalId = goal?.id as string | undefined;
       if (insertError) {
-        console.error("Goal insert error:", insertError.message);
-        return jsonResponse(
-          { error: "Payment succeeded but goal could not be saved" },
-          500
-        );
+        // Backward compatibility: if DB migration for `stake_currency` is not yet applied,
+        // retry insert without that column so goal creation still works.
+        if ((insertError.message ?? "").toLowerCase().includes("stake_currency")) {
+          const retry = await supabase
+            .from("goals")
+            .insert({
+              user_id: userId,
+              title: goalTitle,
+              description: description ?? "",
+              stake: stakeDollars,
+              deadline: deadline,
+              status: "active",
+              judge_name: judgeName ?? null,
+              judge_user_id: judgeUserId ?? null,
+              is_private: !!isPrivate,
+              payment_intent_id: paymentIntent.id,
+              payment_status: "authorized",
+            })
+            .select("id")
+            .single();
+          if (retry.error) {
+            console.error("Goal insert retry error:", retry.error.message);
+            return jsonResponse(
+              { error: "Payment succeeded but goal could not be saved" },
+              500
+            );
+          }
+          goalId = retry.data?.id;
+        } else {
+          console.error("Goal insert error:", insertError.message);
+          return jsonResponse(
+            { error: "Payment succeeded but goal could not be saved" },
+            500
+          );
+        }
       }
 
-      return jsonResponse({ success: true, goalId: goal.id });
+      return jsonResponse({ success: true, goalId });
     }
 
     // Redirect flow: create Checkout Session (legacy / optional)
@@ -157,6 +249,10 @@ serve(async (req: Request): Promise<Response> => {
     }
 
     const { amount, goalTitle, successUrl, cancelUrl } = body;
+    const normalizedCurrency =
+      typeof body?.currency === "string" && supportedCurrencies.has(body.currency.toLowerCase())
+        ? body.currency.toLowerCase()
+        : "usd";
 
     if (
       typeof amount !== "number" ||
@@ -171,7 +267,7 @@ serve(async (req: Request): Promise<Response> => {
       line_items: [
         {
           price_data: {
-            currency: "usd",
+            currency: normalizedCurrency,
             product_data: {
               name: goalTitle || "Goal stake",
             },

@@ -11,7 +11,7 @@ import {
   PopoverFooter,
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { Copy, Settings, User } from "lucide-react";
+import { Copy, History, Settings, User } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { PopoverClose } from "@/components/ui/popover";
@@ -159,10 +159,17 @@ export default function UserProfilePopover() {
           </div>
         </PopoverHeader>
         <PopoverBody className="space-y-1 px-2 py-1">
-          <Button variant="ghost" className="w-full justify-start" size="sm">
-            <User className="mr-2 h-4 w-4" />
-            View Profile
-          </Button>
+          <PopoverClose asChild>
+            <Button
+              variant="ghost"
+              className="w-full justify-start"
+              size="sm"
+              onClick={() => navigate("/profile")}
+            >
+              <User className="mr-2 h-4 w-4" />
+              View Profile
+            </Button>
+          </PopoverClose>
           <PopoverClose asChild>
             <Button
               variant="ghost"
@@ -170,7 +177,7 @@ export default function UserProfilePopover() {
               size="sm"
               onClick={() => navigate("/history")}
             >
-              <User className="mr-2 h-4 w-4" />
+              <History className="mr-2 h-4 w-4" strokeWidth={2} />
               History
             </Button>
           </PopoverClose>

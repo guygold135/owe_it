@@ -1,4 +1,4 @@
-project_id = "ynigtyairtncjqhrfxwb"
+project_id = "lngepgvviuqanzlslqhf"
 
 # Allow create-checkout to be called with your anon key + user JWT (avoids 401)
 [functions.create-checkout]
@@ -8,4 +8,13 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.resolve-goal]
+verify_jwt = false
+
+[functions.settle-expired-goal-payments]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.submit-feedback]
 verify_jwt = false

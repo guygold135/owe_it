@@ -21,7 +21,10 @@ export function BottomNav({ onCreateGoal }: { onCreateGoal: () => void }) {
   };
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-30 bg-card/90 backdrop-blur-xl border-t border-border">
+    <div
+      className="fixed left-0 right-0 z-30 bg-card/90 backdrop-blur-xl border-t border-border"
+      style={{ bottom: 'env(safe-area-inset-bottom)' }}
+    >
       <div className="flex items-center justify-around px-4 py-3 max-w-lg mx-auto">
         {navItems.map(item => {
           const isActive = location.pathname === item.to;

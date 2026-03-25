@@ -7,13 +7,14 @@ import { Target, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 
 export default function Auth() {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, signInWithOAuth } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [oauthLoadingProvider, setOauthLoadingProvider] = useState<'google' | 'apple' | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,6 +31,16 @@ export default function Auth() {
       toast.error(error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOAuth = async (provider: 'google' | 'apple') => {
+    setOauthLoadingProvider(provider);
+    try {
+      await signInWithOAuth(provider);
+    } catch (error: any) {
+      toast.error(error?.message ?? `Could not continue with ${provider}.`);
+      setOauthLoadingProvider(null);
     }
   };
 
@@ -140,6 +151,33 @@ export default function Auth() {
             )}
           </Button>
         </form>
+
+        <div className="my-6 flex items-center gap-3">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-xs text-muted-foreground">or continue with</span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+
+        <div className="space-y-3">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full h-12 rounded-2xl text-sm font-medium"
+            disabled={oauthLoadingProvider !== null}
+            onClick={() => void handleOAuth('google')}
+          >
+            {oauthLoadingProvider === 'google' ? 'Connecting to Google...' : 'Continue with Google'}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full h-12 rounded-2xl text-sm font-medium"
+            disabled={oauthLoadingProvider !== null}
+            onClick={() => void handleOAuth('apple')}
+          >
+            {oauthLoadingProvider === 'apple' ? 'Connecting to Apple...' : 'Continue with Apple'}
+          </Button>
+        </div>
 
         <p className="text-center text-xs text-muted-foreground mt-8">
           {mode === 'signin'

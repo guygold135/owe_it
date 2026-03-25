@@ -12,6 +12,7 @@ type AuthContextValue = {
   loading: boolean;
   signUp: (email: string, password: string, displayName?: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithOAuth: (provider: 'google' | 'apple') => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -142,13 +143,23 @@ function useProvideAuth(): AuthContextValue {
     if (error) throw error;
   };
 
+  const signInWithOAuth = async (provider: 'google' | 'apple') => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+    if (error) throw error;
+  };
+
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   };
 
   return useMemo(
-    () => ({ user, loading, signUp, signIn, signOut }),
+    () => ({ user, loading, signUp, signIn, signInWithOAuth, signOut }),
     [user, loading],
   );
 }

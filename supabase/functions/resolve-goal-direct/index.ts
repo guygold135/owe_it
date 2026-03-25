@@ -25,6 +25,85 @@ function jsonOk(body: unknown) {
   return jsonResponse(body, 200);
 }
 
+async function settleFailedPayment(
+  stripe: Stripe,
+  supabase: ReturnType<typeof createClient>,
+  goal: {
+    id: string;
+    stake: number | null;
+    stake_currency?: string | null;
+    payment_intent_id?: string | null;
+    payment_method_id?: string | null;
+    stripe_customer_id?: string | null;
+  },
+) {
+  const stake = Number(goal.stake ?? 0);
+  if (stake <= 0) return;
+
+  const piId = goal.payment_intent_id ?? null;
+  if (piId) {
+    const pi = await stripe.paymentIntents.retrieve(piId);
+    if (pi.status === "requires_capture") {
+      await stripe.paymentIntents.capture(piId, {
+        idempotencyKey: `goal-capture-${goal.id}`,
+      });
+    }
+    if (pi.status === "requires_capture" || pi.status === "succeeded") {
+      const { error } = await supabase
+        .from("goals")
+        .update({ payment_status: "captured" })
+        .eq("id", goal.id);
+      if (error) throw new Error(`Could not persist captured status: ${error.message}`);
+      return;
+    }
+    if (pi.status === "canceled") {
+      const { error } = await supabase
+        .from("goals")
+        .update({ payment_status: "cancelled" })
+        .eq("id", goal.id);
+      if (error) throw new Error(`Could not persist cancelled status: ${error.message}`);
+      return;
+    }
+    throw new Error(`Payment intent is not capturable (status: ${pi.status})`);
+  }
+
+  const paymentMethodId = goal.payment_method_id ?? null;
+  const customerId = goal.stripe_customer_id ?? null;
+  if (!paymentMethodId || !customerId) {
+    throw new Error("Missing payment method for deferred charge");
+  }
+
+  const currency = (goal.stake_currency ?? "usd").toLowerCase();
+  const amount = Math.round(stake * 100);
+  const deferredPi = await stripe.paymentIntents.create({
+    amount,
+    currency,
+    customer: customerId,
+    payment_method: paymentMethodId,
+    confirm: true,
+    off_session: true,
+    metadata: {
+      goal_id: goal.id,
+      settlement_reason: "failed_or_expired",
+    },
+  }, {
+    idempotencyKey: `goal-failed-${goal.id}`,
+  });
+
+  if (deferredPi.status !== "succeeded") {
+    throw new Error(`Deferred capture failed (status: ${deferredPi.status})`);
+  }
+
+  const { error } = await supabase
+    .from("goals")
+    .update({
+      payment_intent_id: deferredPi.id,
+      payment_status: "captured",
+    })
+    .eq("id", goal.id);
+  if (error) throw new Error(`Could not persist deferred capture: ${error.message}`);
+}
+
 async function getAuthenticatedUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ") || !supabaseUrl || !supabaseServiceKey) return null;
@@ -78,7 +157,7 @@ serve(async (req: Request): Promise<Response> => {
 
     const { data: goal, error: goalError } = await supabase
       .from("goals")
-      .select("id,user_id,title,stake,deadline,status,is_private,judge_user_id,payment_intent_id,payment_status")
+      .select("id,user_id,title,stake,stake_currency,deadline,status,is_private,judge_user_id,payment_intent_id,payment_method_id,stripe_customer_id,payment_status")
       .eq("id", goalId)
       .single();
 
@@ -110,18 +189,25 @@ serve(async (req: Request): Promise<Response> => {
     }
 
     const stake = Number(goal.stake ?? 0);
-    const piId = goal.payment_intent_id as string | null;
 
     // Settle payment if needed
     if (stake > 0) {
-      if (!piId) return jsonOk({ success: false, error: "Missing payment intent" });
-
       if (outcome === "failed") {
-        await stripe.paymentIntents.capture(piId);
-        await supabase.from("goals").update({ payment_status: "captured" }).eq("id", goal.id);
+        await settleFailedPayment(stripe, supabase, goal);
       } else {
-        await stripe.paymentIntents.cancel(piId);
-        await supabase.from("goals").update({ payment_status: "cancelled" }).eq("id", goal.id);
+        const piId = goal.payment_intent_id as string | null;
+        if (!piId) {
+          await supabase.from("goals").update({ payment_status: "not_charged_completed" }).eq("id", goal.id);
+        } else {
+          const pi = await stripe.paymentIntents.retrieve(piId);
+          if (pi.status === "requires_capture") {
+            await stripe.paymentIntents.cancel(piId);
+            await supabase.from("goals").update({ payment_status: "cancelled" }).eq("id", goal.id);
+          } else if (pi.status === "succeeded") {
+            await stripe.refunds.create({ payment_intent: piId });
+            await supabase.from("goals").update({ payment_status: "refunded" }).eq("id", goal.id);
+          }
+        }
       }
     }
 

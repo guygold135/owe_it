@@ -591,13 +591,13 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
     if (error) {
       console.error('Error charging card', error);
-      toast.error(data?.error ?? 'Could not charge card. Goal was not created.');
+      toast.error(data?.error ?? 'Could not save payment method. Goal was not created.');
       throw new Error('checkout');
     }
 
     const payload = data as { success?: boolean; error?: string; goalId?: string };
     if (!payload?.success) {
-      toast.error(payload?.error ?? 'Payment failed. Goal was not created.');
+      toast.error(payload?.error ?? 'Could not prepare payment for later charge. Goal was not created.');
       throw new Error('payment failed');
     }
 
@@ -630,7 +630,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       console.error('Error inserting pulse event', e);
     }
     await loadGoals();
-    toast.success('Goal created and payment successful.');
+    toast.success('Goal created. Card will be charged only if the goal is uncompleted.');
   };
 
   return (
@@ -703,7 +703,8 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', stiffness: 300, damping: 35 }}
-            className="fixed bottom-0 left-0 right-0 z-50 bg-[#0f0f0f] border-t border-border rounded-t-[32px] h-[640px] max-h-[90vh] overflow-hidden"
+            className="fixed bottom-0 left-0 right-0 z-50 bg-[#0f0f0f] border-t border-border rounded-t-[32px] h-[640px] max-h-[90vh] overflow-y-visible overflow-x-hidden"
+            style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
           >
             <div className="p-6 h-full flex flex-col">
               {/* Header */}
@@ -776,7 +777,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       min={minDeadlineInput}
                       onChange={e => setDeadline(e.target.value)}
                       aria-invalid={deadlineIssue ? true : undefined}
-                      className={`block w-full bg-muted rounded-2xl px-5 py-4 text-foreground focus:outline-none focus:ring-2 [color-scheme:dark] ${
+                      className={`block w-full min-w-0 bg-muted rounded-2xl pl-5 pr-12 py-4 text-foreground font-display text-lg focus:outline-none focus:ring-2 [color-scheme:dark] ${
                         deadlineIssue ? 'ring-2 ring-destructive focus:ring-destructive' : 'focus:ring-primary'
                       }`}
                     />

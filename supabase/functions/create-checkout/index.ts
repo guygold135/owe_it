@@ -111,7 +111,7 @@ serve(async (req: Request): Promise<Response> => {
 
     const body = await req.json();
 
-    // In-app flow: charge card and create goal (no redirect)
+    // In-app flow: store payment method now, charge only on failed/expired outcome.
     if (body.paymentMethodId) {
       const authUserId = await getAuthenticatedUserId(req);
       if (!authUserId) {
@@ -161,21 +161,52 @@ serve(async (req: Request): Promise<Response> => {
         );
       }
 
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: amountInCents,
-        currency: normalizedCurrency,
-        payment_method: paymentMethodId,
-        confirm: true,
-        capture_method: "manual",
-        automatic_payment_methods: { enabled: true, allow_redirects: "never" },
-        metadata: { goal_title: goalTitle ?? "" },
+      const existingPaymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+      let customerId = typeof existingPaymentMethod.customer === "string"
+        ? existingPaymentMethod.customer
+        : null;
+
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          metadata: {
+            app_user_id: userId,
+          },
+        });
+        customerId = customer.id;
+        await stripe.paymentMethods.attach(paymentMethodId, {
+          customer: customerId,
+        });
+      }
+
+      await stripe.customers.update(customerId, {
+        invoice_settings: {
+          default_payment_method: paymentMethodId,
+        },
       });
 
-      if (paymentIntent.status !== "requires_capture") {
-        return jsonResponse(
-          { error: "Payment could not be authorized" },
-          402
-        );
+      // Best-effort validation for future off-session usage.
+      // Don't block goal creation if additional authentication is required now.
+      try {
+        const setupIntent = await stripe.setupIntents.create({
+          customer: customerId,
+          payment_method: paymentMethodId,
+          usage: "off_session",
+          confirm: true,
+          automatic_payment_methods: {
+            enabled: true,
+            allow_redirects: "never",
+          },
+        });
+        if (
+          setupIntent.status !== "succeeded" &&
+          setupIntent.status !== "requires_action"
+        ) {
+          console.warn(
+            `SetupIntent for deferred charge was not fully confirmed (status: ${setupIntent.status})`
+          );
+        }
+      } catch (setupErr) {
+        console.warn("SetupIntent validation failed; continuing with stored payment method:", setupErr);
       }
 
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -194,49 +225,26 @@ serve(async (req: Request): Promise<Response> => {
           judge_user_id: judgeUserId ?? null,
           is_private: !!isPrivate,
           stake_currency: normalizedCurrency,
-          payment_intent_id: paymentIntent.id,
-          payment_status: "authorized",
+          stripe_customer_id: customerId,
+          payment_method_id: paymentMethodId,
+          payment_status: "stored_for_later_capture",
         })
         .select("id")
         .single();
 
       let goalId = goal?.id as string | undefined;
       if (insertError) {
-        // Backward compatibility: if DB migration for `stake_currency` is not yet applied,
-        // retry insert without that column so goal creation still works.
-        if ((insertError.message ?? "").toLowerCase().includes("stake_currency")) {
-          const retry = await supabase
-            .from("goals")
-            .insert({
-              user_id: userId,
-              title: goalTitle,
-              description: description ?? "",
-              stake: stakeDollars,
-              deadline: deadline,
-              status: "active",
-              judge_name: judgeName ?? null,
-              judge_user_id: judgeUserId ?? null,
-              is_private: !!isPrivate,
-              payment_intent_id: paymentIntent.id,
-              payment_status: "authorized",
-            })
-            .select("id")
-            .single();
-          if (retry.error) {
-            console.error("Goal insert retry error:", retry.error.message);
-            return jsonResponse(
-              { error: "Payment succeeded but goal could not be saved" },
-              500
-            );
-          }
-          goalId = retry.data?.id;
-        } else {
-          console.error("Goal insert error:", insertError.message);
-          return jsonResponse(
-            { error: "Payment succeeded but goal could not be saved" },
-            500
-          );
+        // Roll back attached payment method on DB failure to avoid orphans.
+        try {
+          await stripe.paymentMethods.detach(paymentMethodId);
+        } catch (detachErr) {
+          console.error("Could not detach payment method after failed goal insert:", detachErr);
         }
+        console.error("Goal insert error:", insertError.message);
+        return jsonResponse(
+          { error: "Payment method saved but goal could not be saved" },
+          500
+        );
       }
 
       return jsonResponse({ success: true, goalId });

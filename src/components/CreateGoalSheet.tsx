@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye } from 'lucide-react';
+import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar } from 'lucide-react';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { useGoals } from '@/hooks/useGoals';
 import { useAuth } from '@/hooks/useAuth';
@@ -166,6 +166,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const { user } = useAuth();
   const { currency: stakeCurrency } = useStakeCurrencyPreference();
   const { enabled: allowShortDeadlines } = useShortDeadlineTesting();
+  const deadlineInputRef = useRef<HTMLInputElement | null>(null);
   const [step, setStep] = useState(0);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -771,16 +772,52 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                   </div>
                   <div>
                     <label className="text-xs uppercase tracking-widest text-muted-foreground mb-2 block">Deadline</label>
-                    <input
-                      type="datetime-local"
-                      value={deadline}
-                      min={minDeadlineInput}
-                      onChange={e => setDeadline(e.target.value)}
-                      aria-invalid={deadlineIssue ? true : undefined}
-                      className={`block w-full min-w-0 bg-muted rounded-2xl pl-5 pr-12 py-4 text-foreground font-display text-lg focus:outline-none focus:ring-2 [color-scheme:dark] ${
-                        deadlineIssue ? 'ring-2 ring-destructive focus:ring-destructive' : 'focus:ring-primary'
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        const el = deadlineInputRef.current;
+                        if (!el) return;
+                        // iOS Safari: opening can fail if the input is fully transparent.
+                        // Prefer showPicker when available, else focus.
+                        (el as any).showPicker?.();
+                        el.focus();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' && e.key !== ' ') return;
+                        e.preventDefault();
+                        const el = deadlineInputRef.current;
+                        if (!el) return;
+                        (el as any).showPicker?.();
+                        el.focus();
+                      }}
+                      className={`relative w-full max-w-full bg-muted rounded-2xl ${
+                        deadlineIssue ? 'ring-2 ring-destructive' : ''
                       }`}
-                    />
+                    >
+                      {/* Visible UI (works consistently on iOS Safari). */}
+                      <div
+                        className={`flex items-center justify-between gap-3 w-full min-w-0 rounded-2xl pl-5 pr-4 py-4 font-display text-lg ${
+                          deadline ? 'text-foreground' : 'text-muted-foreground'
+                        }`}
+                      >
+                        <span className="truncate">
+                          {deadline ? new Date(deadline).toLocaleString() : 'Select a deadline'}
+                        </span>
+                        <Calendar className="w-5 h-5 shrink-0 text-muted-foreground" />
+                      </div>
+
+                      {/* Native input kept for actual picking + validation/min. */}
+                      <input
+                        ref={deadlineInputRef}
+                        type="datetime-local"
+                        value={deadline}
+                        min={minDeadlineInput}
+                        onChange={e => setDeadline(e.target.value)}
+                        aria-invalid={deadlineIssue ? true : undefined}
+                        className="absolute inset-0 z-10 w-full max-w-full cursor-pointer bg-transparent text-transparent caret-transparent opacity-[0.01] appearance-none"
+                      />
+                    </div>
                     {deadlineIssue && (
                       <p className="text-xs text-destructive mt-2">{deadlineIssue}</p>
                     )}

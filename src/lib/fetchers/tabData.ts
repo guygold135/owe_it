@@ -26,6 +26,8 @@ type GoalRow = {
   judge_name: string | null;
   judge_user_id?: string | null;
   is_private: boolean;
+  stake_recipient_user_id?: string | null;
+  stake_charity_id?: string | null;
 };
 
 function mapRowToGoal(row: GoalRow, avatarById: Map<string, string | null>): Goal {
@@ -53,12 +55,18 @@ function mapRowToGoal(row: GoalRow, avatarById: Map<string, string | null>): Goa
     status: row.status,
     judge,
     isPrivate: row.is_private,
+    stakeRecipientUserId: row.stake_recipient_user_id ?? null,
+    stakeCharityId: row.stake_charity_id ?? null,
   };
 }
 
 export async function fetchUserGoals(userId: string): Promise<Goal[]> {
-  const fieldsWithCurrency = 'id,title,description,stake,stake_currency,deadline,created_at,resolved_at,status,judge_name,is_private,user_id,judge_user_id';
-  const fallbackFields = 'id,title,description,stake,deadline,created_at,resolved_at,status,judge_name,is_private,user_id,judge_user_id';
+  const fieldsWithCurrency =
+    'id,title,description,stake,stake_currency,deadline,created_at,resolved_at,status,judge_name,is_private,user_id,judge_user_id,stake_recipient_user_id,stake_charity_id';
+  const fieldsNoCharity =
+    'id,title,description,stake,stake_currency,deadline,created_at,resolved_at,status,judge_name,is_private,user_id,judge_user_id,stake_recipient_user_id';
+  const fallbackFields =
+    'id,title,description,stake,deadline,created_at,resolved_at,status,judge_name,is_private,user_id,judge_user_id,stake_recipient_user_id';
 
   let { data, error } = await supabase
     .from('goals')
@@ -66,7 +74,18 @@ export async function fetchUserGoals(userId: string): Promise<Goal[]> {
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
 
-  if (error && String((error as { message?: unknown })?.message ?? '').toLowerCase().includes('stake_currency')) {
+  let msg = String((error as { message?: unknown })?.message ?? '').toLowerCase();
+  if (error && msg.includes('stake_charity_id')) {
+    const retry = await supabase
+      .from('goals')
+      .select(fieldsNoCharity)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    data = retry.data;
+    error = retry.error;
+    msg = String((error as { message?: unknown })?.message ?? '').toLowerCase();
+  }
+  if (error && msg.includes('stake_currency')) {
     const retry = await supabase
       .from('goals')
       .select(fallbackFields)
@@ -83,22 +102,58 @@ export async function fetchUserGoals(userId: string): Promise<Goal[]> {
 
   const rows = (data ?? []) as GoalRow[];
   const judgeIds = [...new Set(rows.map((r) => r.judge_user_id).filter(Boolean))] as string[];
+  const recipientIds = [...new Set(rows.map((r) => r.stake_recipient_user_id).filter(Boolean))] as string[];
+  const charityIds = [...new Set(rows.map((r) => r.stake_charity_id).filter(Boolean))] as string[];
+  const profileIdsForAux = [...new Set([...judgeIds, ...recipientIds])];
   let avatarById = new Map<string, string | null>();
-  if (judgeIds.length > 0) {
+  let recipientNameById = new Map<string, string>();
+  let charityNameById = new Map<string, string>();
+  if (profileIdsForAux.length > 0) {
     try {
       const { data: profiles } = await withTimeout(
-        supabase.from('profiles').select('id, avatar_url').in('id', judgeIds),
+        supabase.from('profiles').select('id, avatar_url, display_name').in('id', profileIdsForAux),
         AUX_QUERY_TIMEOUT_MS,
       );
       avatarById = new Map(
         (profiles ?? []).map((p: { id: string; avatar_url: string | null }) => [p.id, p.avatar_url]),
+      );
+      recipientNameById = new Map(
+        (profiles ?? []).map((p: { id: string; display_name: string | null }) => [
+          p.id,
+          p.display_name ?? 'Friend',
+        ]),
       );
     } catch (e) {
       console.warn('Profile avatar fetch skipped (timeout/error)', e);
     }
   }
 
-  return rows.map((row) => mapRowToGoal(row, avatarById));
+  if (charityIds.length > 0) {
+    try {
+      const { data: charityRows } = await withTimeout(
+        supabase.from('charities').select('id, name').in('id', charityIds),
+        AUX_QUERY_TIMEOUT_MS,
+      );
+      charityNameById = new Map(
+        (charityRows ?? []).map((c: { id: string; name: string }) => [c.id, c.name]),
+      );
+    } catch (e) {
+      console.warn('Charity name fetch skipped (timeout/error)', e);
+    }
+  }
+
+  return rows.map((row) => {
+    const g = mapRowToGoal(row, avatarById);
+    const rid = row.stake_recipient_user_id;
+    if (rid) {
+      g.stakeRecipientName = recipientNameById.get(rid) ?? null;
+    }
+    const cid = row.stake_charity_id;
+    if (cid) {
+      g.stakeCharityName = charityNameById.get(cid) ?? null;
+    }
+    return g;
+  });
 }
 
 type JudgeGoalRow = GoalRow & { user_id: string };
@@ -244,6 +299,7 @@ export type ProfileLite = {
   display_name: string;
   avatar_url: string | null;
   friend_code: string | null;
+  stakePayoutsReady?: boolean;
 };
 
 export type IncomingRequest = {
@@ -308,10 +364,18 @@ export async function fetchFriendsBundle(userId: string): Promise<FriendsBundle>
 
   const { data: allProfiles } =
     profileIds.length === 0
-      ? { data: [] as { id: string; display_name: string | null; avatar_url: string | null; friend_code: string | null }[] }
+      ? {
+          data: [] as {
+            id: string;
+            display_name: string | null;
+            avatar_url: string | null;
+            friend_code: string | null;
+            stake_payouts_ready?: boolean | null;
+          }[],
+        }
       : await supabase
           .from('profiles')
-          .select('id, display_name, avatar_url, friend_code')
+          .select('id, display_name, avatar_url, friend_code, stake_payouts_ready')
           .in('id', profileIds);
 
   const profilesById = new Map<string, ProfileLite>();
@@ -320,6 +384,7 @@ export async function fetchFriendsBundle(userId: string): Promise<FriendsBundle>
     display_name: string | null;
     avatar_url: string | null;
     friend_code: string | null;
+    stake_payouts_ready?: boolean | null;
   }[];
   profileRows.forEach((p) => {
     profilesById.set(p.id, {
@@ -327,6 +392,7 @@ export async function fetchFriendsBundle(userId: string): Promise<FriendsBundle>
       display_name: p.display_name ?? '',
       avatar_url: p.avatar_url ?? null,
       friend_code: p.friend_code ?? null,
+      stakePayoutsReady: !!p.stake_payouts_ready,
     });
   });
 
@@ -343,6 +409,7 @@ export async function fetchFriendsBundle(userId: string): Promise<FriendsBundle>
           activeGoals: 0,
           completedGoals: 0,
           totalStaked: 0,
+          stakePayoutsReady: p.stakePayoutsReady,
         } as Friend;
       })
       .filter(Boolean) as Friend[];

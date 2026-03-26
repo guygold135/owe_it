@@ -12,6 +12,12 @@ export interface Goal {
   judge: Judge;
   isPrivate: boolean;
   proof?: string;
+  /** If set, failed stake is paid out to this friend (Stripe Connect). */
+  stakeRecipientUserId?: string | null;
+  stakeRecipientName?: string | null;
+  /** If set, failed stake is paid out to this charity (Stripe Connect). */
+  stakeCharityId?: string | null;
+  stakeCharityName?: string | null;
 }
 
 /** Goal shown on "My judges" — includes creator info for cards */
@@ -31,6 +37,8 @@ export interface Friend {
   activeGoals: number;
   completedGoals: number;
   totalStaked: number;
+  /** Friend finished Stripe Connect onboarding and can receive failed stakes. */
+  stakePayoutsReady?: boolean;
 }
 
 export interface PulseItem {

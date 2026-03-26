@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { SUPPORTED_STAKE_CURRENCIES, formatStakeCurrencyLabel, type StakeCurrency } from '@/lib/currency';
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
@@ -13,7 +13,10 @@ import { useShortDeadlineTesting } from '@/hooks/useShortDeadlineTesting';
 export default function Settings() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
+  const [stakePayoutsReady, setStakePayoutsReady] = useState(false);
+  const [connectLoading, setConnectLoading] = useState(false);
   const { currency, setCurrency } = useStakeCurrencyPreference();
   const { enabled: allowShortDeadlines, setEnabled: setAllowShortDeadlines } = useShortDeadlineTesting();
   const [currencySearch, setCurrencySearch] = useState('');
@@ -23,6 +26,42 @@ export default function Settings() {
   useEffect(() => {
     setCurrencySearch(formatStakeCurrencyLabel(currency));
   }, [currency]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void (async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('stake_payouts_ready')
+        .eq('id', user.id)
+        .maybeSingle();
+      setStakePayoutsReady(!!(data as { stake_payouts_ready?: boolean } | null)?.stake_payouts_ready);
+    })();
+  }, [user?.id]);
+
+  const stripeConnectDone = searchParams.get('stripe_connect');
+  useEffect(() => {
+    if (stripeConnectDone !== 'done') return;
+    toast.success('Bank connection updated.');
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('stripe_connect');
+        return next;
+      },
+      { replace: true },
+    );
+    if (user?.id) {
+      void supabase
+        .from('profiles')
+        .select('stake_payouts_ready')
+        .eq('id', user.id)
+        .maybeSingle()
+        .then(({ data }) => {
+          setStakePayoutsReady(!!(data as { stake_payouts_ready?: boolean } | null)?.stake_payouts_ready);
+        });
+    }
+  }, [stripeConnectDone, setSearchParams, user?.id]);
 
   const filteredCurrencies = useMemo(() => {
     const q = currencySearch.trim().toLowerCase();
@@ -44,6 +83,32 @@ export default function Settings() {
     window.addEventListener('mousedown', onPointerDown);
     return () => window.removeEventListener('mousedown', onPointerDown);
   }, [currency]);
+
+  const handleConnectReceiveStakes = async () => {
+    if (!user?.id) return;
+    setConnectLoading(true);
+    try {
+      const returnUrl = `${window.location.origin}${window.location.pathname}?stripe_connect=done`;
+      const { data, error } = await supabase.functions.invoke('stripe-connect-onboarding', {
+        body: { returnUrl, refreshUrl: returnUrl },
+      });
+      if (error) {
+        toast.error(error.message ?? 'Could not start bank setup.');
+        return;
+      }
+      const url = (data as { url?: string })?.url;
+      if (!url) {
+        toast.error('Could not start bank setup.');
+        return;
+      }
+      window.location.assign(url);
+    } catch (e: unknown) {
+      console.error(e);
+      toast.error('Could not start bank setup.');
+    } finally {
+      setConnectLoading(false);
+    }
+  };
 
   const handleDeleteAccount = async () => {
     if (!user) return;
@@ -134,6 +199,35 @@ export default function Settings() {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+              <Wallet className="h-4 w-4 text-primary" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-foreground">Receive failed stakes</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Let friends send you money if they miss a goal. Uses Stripe to connect a bank account.
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">
+                Status:{' '}
+                <span className={stakePayoutsReady ? 'text-emerald-500 font-medium' : 'text-muted-foreground'}>
+                  {stakePayoutsReady ? 'Ready to receive payouts' : 'Not set up yet'}
+                </span>
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            disabled={connectLoading}
+            onClick={handleConnectReceiveStakes}
+          >
+            {connectLoading ? 'Opening Stripe…' : stakePayoutsReady ? 'Update bank details' : 'Connect bank account'}
+          </Button>
         </div>
 
         <div className="p-4 rounded-2xl bg-card border border-border space-y-3">

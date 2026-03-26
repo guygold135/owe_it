@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar } from 'lucide-react';
+import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar, Heart } from 'lucide-react';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { useGoals } from '@/hooks/useGoals';
 import { useAuth } from '@/hooks/useAuth';
@@ -54,6 +55,12 @@ function getDeadlineValidationError(
 
 type CloseConfirmKind = 'judge-wait' | 'card' | 'sign';
 
+type CharityOption = {
+  id: string;
+  name: string;
+  short_description: string | null;
+};
+
 const CARD_ELEMENT_OPTIONS = {
   style: {
     base: {
@@ -99,12 +106,30 @@ function buildPresetStakesForCurrency(currency: string): number[] {
   return USD_BASE_PRESET_STAKES.map((usdAmount) => usdAmount * multiplier);
 }
 
-function CardStepFields({ stake, stakeCurrency }: { stake: number; stakeCurrency: string }) {
+function CardStepFields({
+  stake,
+  stakeCurrency,
+  recipientName,
+}: {
+  stake: number;
+  stakeCurrency: string;
+  recipientName: string | null;
+}) {
   return (
     <div className="space-y-6 flex-1">
       <p className="text-sm text-muted-foreground">
-        Your card will be charged {formatStakeAmount(stake, stakeCurrency)} if you don’t complete your goal by the
-        deadline.
+        {recipientName ? (
+          <>
+            If you don’t complete your goal by the deadline, your card will be charged{' '}
+            {formatStakeAmount(stake, stakeCurrency)} and the funds will be sent to{' '}
+            <span className="font-medium text-foreground">{recipientName}</span>.
+          </>
+        ) : (
+          <>
+            Your card will be charged {formatStakeAmount(stake, stakeCurrency)} if you don’t complete your goal by the
+            deadline.
+          </>
+        )}
       </p>
 
       <div className="p-4 bg-muted rounded-2xl">
@@ -178,6 +203,11 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const [customStakeError, setCustomStakeError] = useState(false);
   const [customStakeInput, setCustomStakeInput] = useState('');
   const [friends, setFriends] = useState<Friend[]>([]);
+  /** If you fail: platform, a friend with Connect, or a charity with Connect. */
+  const [stakeRecipientMode, setStakeRecipientMode] = useState<'platform' | 'friend' | 'charity'>('platform');
+  const [stakeRecipientFriendId, setStakeRecipientFriendId] = useState<string | null>(null);
+  const [stakeCharityId, setStakeCharityId] = useState<string | null>(null);
+  const [charities, setCharities] = useState<CharityOption[]>([]);
   const [judgeRequestId, setJudgeRequestId] = useState<string | null>(null);
   const [waitingJudgeName, setWaitingJudgeName] = useState<string | null>(null);
   const [confirmCloseKind, setConfirmCloseKind] = useState<CloseConfirmKind | null>(null);
@@ -195,6 +225,48 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   useEffect(() => {
     stakeRef.current = stake;
   }, [stake]);
+
+  useEffect(() => {
+    if (stake === 0) {
+      setStakeRecipientMode('platform');
+      setStakeRecipientFriendId(null);
+      setStakeCharityId(null);
+    }
+  }, [stake]);
+
+  useEffect(() => {
+    if (!open) return;
+    void (async () => {
+      const { data, error } = await supabase
+        .from('charities')
+        .select('id, name, short_description')
+        .eq('active', true)
+        .eq('stake_payouts_ready', true)
+        .order('name');
+      if (error) {
+        console.warn('Could not load charities (table may not exist yet):', error.message);
+        setCharities([]);
+        return;
+      }
+      setCharities((data ?? []) as CharityOption[]);
+    })();
+  }, [open]);
+
+  const friendsEligibleForPayout = useMemo(
+    () => friends.filter((f) => f.stakePayoutsReady),
+    [friends],
+  );
+
+  /** Shown on card step / confirm — friend name or charity name, or null for platform. */
+  const stakeDestinationDisplayName = useMemo(() => {
+    if (stakeRecipientMode === 'charity' && stakeCharityId) {
+      return charities.find((c) => c.id === stakeCharityId)?.name ?? null;
+    }
+    if (stakeRecipientMode === 'friend' && stakeRecipientFriendId) {
+      return friends.find((f) => f.id === stakeRecipientFriendId)?.name ?? null;
+    }
+    return null;
+  }, [stakeRecipientMode, stakeCharityId, stakeRecipientFriendId, charities, friends]);
 
   useEffect(() => {
     if (step !== 4) setSignOverlayPhase('idle');
@@ -253,7 +325,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('id, display_name, avatar_url')
+        .select('id, display_name, avatar_url, stake_payouts_ready')
         .in('id', friendIds);
 
       if (profilesError) {
@@ -269,6 +341,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
         activeGoals: 0,
         completedGoals: 0,
         totalStaked: 0,
+        stakePayoutsReady: !!p.stake_payouts_ready,
       }));
       mapped.sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
       setFriends(mapped);
@@ -386,6 +459,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     setStep(0); setTitle(''); setDescription(''); setStake(0);
     setDeadline(''); setJudge(null); setIsPrivate(false);
     setPaymentMethodId(null); setCustomStakeInput(''); setCustomStakeError(false);
+    setStakeRecipientMode('platform');
+    setStakeRecipientFriendId(null);
+    setStakeCharityId(null);
     setJudgeRequestId(null); setWaitingJudgeName(null);
     setConfirmCloseKind(null);
     setSignOverlayPhase('idle');
@@ -449,6 +525,8 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     }
     if (step === 1) {
       if (customStakeInput.trim() !== '' && customStakeError) return false;
+      if (stake > 0 && stakeRecipientMode === 'friend' && !stakeRecipientFriendId) return false;
+      if (stake > 0 && stakeRecipientMode === 'charity' && !stakeCharityId) return false;
       return true;
     }
     if (step === 2) return judge !== null; // Judge step
@@ -503,6 +581,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               stakeCurrency,
               deadline: deadlineDate.toISOString(),
               isPrivate,
+              stakeRecipientUserId:
+                stake > 0 && stakeRecipientMode === 'friend' ? stakeRecipientFriendId : null,
+              stakeCharityId: stake > 0 && stakeRecipientMode === 'charity' ? stakeCharityId : null,
             };
             const { data, error } = await supabase.rpc('create_judge_request', {
               p_judge_user_id: judge.id,
@@ -587,6 +668,10 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
         isPrivate,
         amount: amountInCents,
         currency: stakeCurrency,
+        stakeRecipientUserId:
+          stake > 0 && stakeRecipientMode === 'friend' ? stakeRecipientFriendId : undefined,
+        stakeCharityId:
+          stake > 0 && stakeRecipientMode === 'charity' ? stakeCharityId : undefined,
       },
     });
 
@@ -704,12 +789,12 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', stiffness: 300, damping: 35 }}
-            className="fixed bottom-0 left-0 right-0 z-50 bg-[#0f0f0f] border-t border-border rounded-t-[32px] h-[640px] max-h-[90vh] overflow-y-visible overflow-x-hidden"
+            className="fixed bottom-0 left-0 right-0 z-50 flex max-h-[90vh] flex-col overflow-hidden border-t border-border bg-[#0f0f0f] rounded-t-[32px] h-[min(640px,90vh)]"
             style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
           >
-            <div className="p-6 h-full flex flex-col">
+            <div className="flex h-full min-h-0 flex-col p-4 sm:p-6">
               {/* Header */}
-              <div className="flex items-center justify-between mb-6">
+              <div className="mb-3 flex shrink-0 items-center justify-between sm:mb-4">
                 <h2 className="text-xl font-display font-bold text-foreground">
                   {step === 0 && 'Define Your Goal'}
                   {step === 1 && 'Set Your Stake'}
@@ -728,7 +813,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               </div>
 
               {/* Step indicators */}
-              <div className="flex gap-2 mb-6">
+              <div className="mb-3 flex shrink-0 gap-2 sm:mb-4">
                 {steps.map((_, i) => {
                   const isCompleted = i <= step;
                   return (
@@ -742,6 +827,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                 })}
               </div>
 
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {/* Step 0: Goal */}
               {step === 0 && (
                 <div className="flex flex-col gap-5 flex-1">
@@ -752,7 +838,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       value={title}
                       onChange={e => setTitle(e.target.value)}
                       placeholder="e.g., Finish Portfolio"
-                      className="block w-full bg-muted rounded-2xl px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary font-display text-lg"
+                      className="block w-full bg-muted rounded-2xl px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary font-display text-lg"
                     />
                     {duplicateActiveTitle && (
                       <p className="text-xs text-destructive mt-2">
@@ -767,7 +853,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       onChange={e => setDescription(e.target.value)}
                       placeholder="What exactly needs to get done?"
                       rows={3}
-                      className="block w-full bg-muted rounded-2xl px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                      className="block w-full bg-muted rounded-2xl px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary resize-none"
                     />
                   </div>
                   <div>
@@ -791,20 +877,24 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         (el as any).showPicker?.();
                         el.focus();
                       }}
-                      className={`relative w-full max-w-full bg-muted rounded-2xl ${
-                        deadlineIssue ? 'ring-2 ring-destructive' : ''
+                      className={`relative w-full max-w-full bg-muted rounded-2xl [color-scheme:dark] ${
+                        deadlineIssue ? 'ring-2 ring-inset ring-destructive' : 'focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary/40'
                       }`}
                     >
                       {/* Visible UI (works consistently on iOS Safari). */}
                       <div
-                        className={`flex items-center justify-between gap-3 w-full min-w-0 rounded-2xl pl-5 pr-4 py-4 font-display text-lg ${
+                        className={`pointer-events-none flex items-center justify-between gap-3 w-full min-w-0 rounded-2xl pl-5 pr-4 py-4 font-display text-lg ${
                           deadline ? 'text-foreground' : 'text-muted-foreground'
                         }`}
                       >
                         <span className="truncate">
                           {deadline ? new Date(deadline).toLocaleString() : 'Select a deadline'}
                         </span>
-                        <Calendar className="w-5 h-5 shrink-0 text-muted-foreground" />
+                        <Calendar
+                          className="w-5 h-5 shrink-0 text-primary"
+                          strokeWidth={2}
+                          aria-hidden
+                        />
                       </div>
 
                       {/* Native input kept for actual picking + validation/min. */}
@@ -815,7 +905,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         min={minDeadlineInput}
                         onChange={e => setDeadline(e.target.value)}
                         aria-invalid={deadlineIssue ? true : undefined}
-                        className="absolute inset-0 z-10 w-full max-w-full cursor-pointer bg-transparent text-transparent caret-transparent opacity-[0.01] appearance-none"
+                        className="absolute inset-0 z-10 w-full max-w-full cursor-pointer bg-transparent text-transparent caret-transparent opacity-[0.01] appearance-none [color-scheme:dark]"
                       />
                     </div>
                     {deadlineIssue && (
@@ -837,109 +927,246 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                 </div>
               )}
 
-              {/* Step 1: Stake */}
+              {/* Step 1: Stake — amount first, then destination (only applies when stake &gt; 0) */}
               {step === 1 && (
-                <div className="space-y-5 flex-1">
-                  <div className="text-center py-4">
-                    <p className="text-xs uppercase tracking-widest text-muted-foreground mb-4">Your Stake</p>
-                    <motion.div
-                      key={stake}
-                      initial={{ scale: 1 }}
-                      animate={{ scale: [1, 1.05, 1] }}
-                      transition={{ duration: 0.2 }}
-                      className="text-6xl font-display font-extrabold text-primary tabular-nums tracking-tighter"
-                    >
-                      {formatStakeAmount(stake, stakeCurrency)}
-                    </motion.div>
-                    <p className="text-sm text-muted-foreground mt-4">
-                      Put money on the line!
-                      <br />
-                      If you fail, this amount will be charged.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-4 gap-2">
-                    {presetStakes.map(amount => (
-                      <button
-                        key={amount}
-                        type="button"
-                        onClick={() => {
-                          setStake(amount);
-                          setCustomStakeInput('');
-                        }}
-                        className={`py-3 rounded-2xl font-display font-bold text-sm transition-all ${
-                          customStakeInput === '' && stake === amount
-                            ? 'bg-primary text-primary-foreground glow-primary'
-                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                        }`}
+                <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+                  <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+                    <div className="shrink-0 text-center">
+                      <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Your stake</p>
+                      <motion.div
+                        key={stake}
+                        initial={{ scale: 1 }}
+                        animate={{ scale: [1, 1.03, 1] }}
+                        transition={{ duration: 0.2 }}
+                        className="text-4xl font-display font-extrabold text-primary tabular-nums tracking-tighter sm:text-5xl"
                       >
-                        {amount === 0 ? 'Free' : formatStakePresetAmount(amount, stakeCurrency)}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs uppercase tracking-widest text-muted-foreground block">
-                      Or custom amount
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground font-display">{stakeCurrency.toUpperCase()}</span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={customStakeInput || (presetStakes.includes(stake) ? '' : stake.toString())}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setCustomStakeInput(v);
-                          if (v === '') {
-                            setCustomStakeError(false);
-                            setStake(0);
-                            return;
-                          }
-                          // Allow only digits and at most one dot
-                          const numericPattern = /^\d*\.?\d*$/;
-                          if (!numericPattern.test(v)) {
-                            setCustomStakeError(true);
-                            return;
-                          }
-                          setCustomStakeError(false);
-                          const num = Number(v);
-                          if (num >= 0) {
-                            if (num === 0 || num >= STRIPE_MIN_DOLLARS) {
-                              setStake(Math.round(num * 100) / 100);
-                            }
-                          }
-                        }}
-                        onBlur={() => {
-                          const raw = customStakeInput.trim();
-                          if (raw === '') return;
-                          if (customStakeError) return;
-                          const num = parseFloat(raw);
-                          if (Number.isNaN(num) || num < 0) {
-                            setCustomStakeInput('');
-                            setStake(0);
-                            return;
-                          }
-                          if (num > 0 && num < STRIPE_MIN_DOLLARS) {
-                            toast.error(
-                              `Minimum charge is ${formatStakeAmount(STRIPE_MIN_DOLLARS, stakeCurrency)} (Stripe requirement).`,
-                            );
-                            setCustomStakeInput('');
-                            setStake(0);
-                            return;
-                          }
-                          const rounded = Math.round(num * 100) / 100;
-                          setStake(rounded);
-                          setCustomStakeInput(
-                            rounded === Math.floor(rounded) ? rounded.toString() : rounded.toFixed(2)
-                          );
-                        }}
-                        className={`flex-1 bg-muted rounded-2xl px-4 py-3 text-foreground font-display font-semibold tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 [color-scheme:dark] border ${
-                          customStakeError ? 'border-destructive ring-destructive' : 'border-transparent focus:ring-primary'
-                        }`}
-                      />
+                        {formatStakeAmount(stake, stakeCurrency)}
+                      </motion.div>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        {stake > 0 ? 'Charged only if you fail.' : 'Free goal — no charge.'}
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Minimum {formatStakeAmount(STRIPE_MIN_DOLLARS, stakeCurrency)} for a stake.
-                    </p>
+                    <div className="grid shrink-0 grid-cols-4 gap-1.5">
+                      {presetStakes.map((amount) => (
+                        <button
+                          key={amount}
+                          type="button"
+                          onClick={() => {
+                            setStake(amount);
+                            setCustomStakeInput('');
+                          }}
+                          className={`rounded-xl py-2 font-display text-[11px] font-bold transition-all sm:text-xs ${
+                            customStakeInput === '' && stake === amount
+                              ? 'bg-primary text-primary-foreground glow-primary'
+                              : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                          }`}
+                        >
+                          {amount === 0 ? 'Free' : formatStakePresetAmount(amount, stakeCurrency)}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="shrink-0 space-y-1">
+                      <label className="block text-[10px] uppercase tracking-wider text-muted-foreground">Custom</label>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-display text-muted-foreground">{stakeCurrency.toUpperCase()}</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={customStakeInput || (presetStakes.includes(stake) ? '' : stake.toString())}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setCustomStakeInput(v);
+                            if (v === '') {
+                              setCustomStakeError(false);
+                              setStake(0);
+                              return;
+                            }
+                            const numericPattern = /^\d*\.?\d*$/;
+                            if (!numericPattern.test(v)) {
+                              setCustomStakeError(true);
+                              return;
+                            }
+                            setCustomStakeError(false);
+                            const num = Number(v);
+                            if (num >= 0) {
+                              if (num === 0 || num >= STRIPE_MIN_DOLLARS) {
+                                setStake(Math.round(num * 100) / 100);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            const raw = customStakeInput.trim();
+                            if (raw === '') return;
+                            if (customStakeError) return;
+                            const num = parseFloat(raw);
+                            if (Number.isNaN(num) || num < 0) {
+                              setCustomStakeInput('');
+                              setStake(0);
+                              return;
+                            }
+                            if (num > 0 && num < STRIPE_MIN_DOLLARS) {
+                              toast.error(
+                                `Minimum charge is ${formatStakeAmount(STRIPE_MIN_DOLLARS, stakeCurrency)} (Stripe requirement).`,
+                              );
+                              setCustomStakeInput('');
+                              setStake(0);
+                              return;
+                            }
+                            const rounded = Math.round(num * 100) / 100;
+                            setStake(rounded);
+                            setCustomStakeInput(
+                              rounded === Math.floor(rounded) ? rounded.toString() : rounded.toFixed(2),
+                            );
+                          }}
+                          className={`min-w-0 flex-1 rounded-xl border bg-muted px-3 py-2 font-display text-sm font-semibold tabular-nums text-foreground [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-primary ${
+                            customStakeError ? 'border-destructive ring-destructive' : 'border-transparent'
+                          }`}
+                        />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        Min. {formatStakeAmount(STRIPE_MIN_DOLLARS, stakeCurrency)} for paid stakes
+                      </p>
+                    </div>
+
+                    <div
+                      className={`shrink-0 space-y-2 rounded-2xl border border-border bg-card/40 p-3 ${
+                        stake === 0 ? 'opacity-70' : ''
+                      }`}
+                    >
+                      <div className="flex flex-col gap-0.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          If you fail, send the stake to
+                        </p>
+                        {stake === 0 && (
+                          <p className="text-[10px] text-muted-foreground/90">Select a paid stake above first.</p>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <button
+                          type="button"
+                          disabled={stake === 0}
+                          onClick={() => {
+                            setStakeRecipientMode('platform');
+                            setStakeRecipientFriendId(null);
+                            setStakeCharityId(null);
+                          }}
+                          className={`rounded-lg py-2 px-0.5 font-display text-[11px] font-semibold leading-tight transition-colors sm:text-xs disabled:cursor-not-allowed disabled:opacity-80 ${
+                            stake > 0 && stakeRecipientMode === 'platform'
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                          }`}
+                        >
+                          Platform
+                        </button>
+                        <button
+                          type="button"
+                          disabled={stake === 0}
+                          onClick={() => {
+                            setStakeRecipientMode('charity');
+                            setStakeRecipientFriendId(null);
+                          }}
+                          className={`flex flex-col items-center justify-center gap-0.5 rounded-lg py-2 px-0.5 font-display text-[11px] font-semibold leading-tight transition-colors sm:text-xs disabled:cursor-not-allowed disabled:opacity-80 ${
+                            stake > 0 && stakeRecipientMode === 'charity'
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                          }`}
+                        >
+                          <Heart className="h-3 w-3 shrink-0" aria-hidden />
+                          Charity
+                        </button>
+                        <button
+                          type="button"
+                          disabled={stake === 0}
+                          onClick={() => {
+                            setStakeRecipientMode('friend');
+                            setStakeCharityId(null);
+                          }}
+                          className={`rounded-lg py-2 px-0.5 font-display text-[11px] font-semibold leading-tight transition-colors sm:text-xs disabled:cursor-not-allowed disabled:opacity-80 ${
+                            stake > 0 && stakeRecipientMode === 'friend'
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                          }`}
+                        >
+                          Friend
+                        </button>
+                      </div>
+
+                      {stake > 0 && stakeRecipientMode === 'charity' && (
+                        <div className="max-h-[22vh] space-y-1 overflow-y-auto pt-0.5">
+                          {charities.length === 0 ? (
+                            <p className="text-[10px] leading-snug text-muted-foreground">
+                              No charities yet — add in DB or pick Platform / Friend.{' '}
+                              <Link to="/settings" className="text-primary underline underline-offset-2">
+                                Settings
+                              </Link>
+                            </p>
+                          ) : (
+                            <>
+                              <p className="text-[10px] text-muted-foreground">Pick one</p>
+                              <div className="space-y-1">
+                                {charities.map((c) => (
+                                  <button
+                                    key={c.id}
+                                    type="button"
+                                    onClick={() => setStakeCharityId(c.id)}
+                                    className={`flex w-full flex-col gap-0 rounded-lg border px-2 py-1.5 text-left transition-colors ${
+                                      stakeCharityId === c.id
+                                        ? 'border-primary bg-primary/10'
+                                        : 'border-border hover:border-muted-foreground/30'
+                                    }`}
+                                  >
+                                    <span className="font-display text-xs font-semibold text-foreground">{c.name}</span>
+                                    {c.short_description ? (
+                                      <span className="line-clamp-1 text-[10px] text-muted-foreground">
+                                        {c.short_description}
+                                      </span>
+                                    ) : null}
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {stake > 0 && stakeRecipientMode === 'friend' && (
+                        <div className="max-h-[22vh] space-y-1 overflow-y-auto pt-0.5">
+                          {friendsEligibleForPayout.length === 0 ? (
+                            <p className="text-[10px] leading-snug text-muted-foreground">
+                              No friends with bank yet.{' '}
+                              <Link to="/settings" className="text-primary underline underline-offset-2">
+                                Settings
+                              </Link>
+                            </p>
+                          ) : (
+                            <>
+                              <p className="text-[10px] text-muted-foreground">Pick one</p>
+                              <div className="space-y-1">
+                                {friendsEligibleForPayout.map((friend) => (
+                                  <button
+                                    key={friend.id}
+                                    type="button"
+                                    onClick={() => setStakeRecipientFriendId(friend.id)}
+                                    className={`flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition-colors ${
+                                      stakeRecipientFriendId === friend.id
+                                        ? 'border-primary bg-primary/10'
+                                        : 'border-border hover:border-muted-foreground/30'
+                                    }`}
+                                  >
+                                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground">
+                                      {friend.name.charAt(0)}
+                                    </div>
+                                    <span className="font-display text-xs font-semibold text-foreground">
+                                      {friend.name}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1031,7 +1258,11 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               {step === 3 && stripePromise && (
                 <Elements stripe={stripePromise}>
                   <div className="flex flex-col flex-1 min-h-0">
-                    <CardStepFields stake={stake} stakeCurrency={stakeCurrency} />
+                    <CardStepFields
+                      stake={stake}
+                      stakeCurrency={stakeCurrency}
+                      recipientName={stakeDestinationDisplayName}
+                    />
                     <div className="flex gap-3 mt-8">
                       <button
                         type="button"
@@ -1098,6 +1329,22 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       <span className="text-xs uppercase tracking-widest text-muted-foreground">Visibility</span>
                       <span className="text-sm text-foreground">{isPrivate ? 'Private' : 'Public'}</span>
                     </div>
+                    {stake > 0 && (
+                      <div className="flex justify-between gap-4">
+                        <span className="text-xs uppercase tracking-widest text-muted-foreground shrink-0">
+                          If you fail
+                        </span>
+                        <span className="text-sm text-foreground text-right">
+                          {stakeRecipientMode === 'platform'
+                            ? 'Stake → Platform'
+                            : stakeDestinationDisplayName
+                              ? stakeRecipientMode === 'charity'
+                                ? `Stake → ${stakeDestinationDisplayName} (charity)`
+                                : `Stake → ${stakeDestinationDisplayName}`
+                              : '—'}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-auto flex shrink-0 gap-3 pt-6">
@@ -1136,10 +1383,11 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                   </div>
                 </div>
               )}
+              </div>
 
               {/* Navigation: hide on card & confirm (those steps use Back + primary in a row) */}
               {step < 4 && step !== 3 && !(step === 2 && Boolean(judgeRequestId)) && (
-                <div className="flex gap-3 mt-8">
+                <div className="mt-4 flex shrink-0 gap-3 sm:mt-6">
                   {step > 0 && (
                     <button
                       type="button"

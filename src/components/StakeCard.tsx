@@ -81,8 +81,20 @@ export function StakeCard({ goal, onClick }: { goal: Goal; onClick?: () => void 
 
       {/* Stake amount */}
       {goal.stake > 0 && (
-        <div className={`mt-3 text-3xl font-display font-extrabold tabular-nums ${accentColor}`}>
-          {formatStakeAmount(goal.stake, goal.stakeCurrency)}
+        <div className="mt-3">
+          <div className={`text-3xl font-display font-extrabold tabular-nums ${accentColor}`}>
+            {formatStakeAmount(goal.stake, goal.stakeCurrency)}
+          </div>
+          {goal.stakeCharityName ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              If uncompleted → <span className="text-foreground font-medium">{goal.stakeCharityName}</span>{' '}
+              <span className="text-muted-foreground/80">(charity)</span>
+            </p>
+          ) : goal.stakeRecipientName ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              If uncompleted → <span className="text-foreground font-medium">{goal.stakeRecipientName}</span>
+            </p>
+          ) : null}
         </div>
       )}
 

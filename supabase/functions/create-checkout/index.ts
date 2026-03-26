@@ -1,5 +1,5 @@
 import Stripe from "npm:stripe@16.6.0";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.49.1";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
@@ -129,7 +129,22 @@ serve(async (req: Request): Promise<Response> => {
         isPrivate,
         amount: amountInCents,
         currency,
-      } = body;
+        stakeRecipientUserId: stakeRecipientUserIdRaw,
+        stakeCharityId: stakeCharityIdRaw,
+      } = body as {
+        paymentMethodId?: string;
+        userId?: string;
+        goalTitle?: string;
+        description?: string;
+        deadline?: string;
+        judgeName?: string | null;
+        judgeUserId?: string | null;
+        isPrivate?: boolean;
+        amount?: number;
+        currency?: string;
+        stakeRecipientUserId?: string | null;
+        stakeCharityId?: string | null;
+      };
 
       const normalizedCurrency =
         typeof currency === "string" && supportedCurrencies.has(currency.toLowerCase())
@@ -212,6 +227,80 @@ serve(async (req: Request): Promise<Response> => {
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
       const stakeDollars = amountInCents / 100;
 
+      const hasFriend =
+        stakeRecipientUserIdRaw !== undefined &&
+        stakeRecipientUserIdRaw !== null &&
+        stakeRecipientUserIdRaw !== "";
+      const hasCharity =
+        stakeCharityIdRaw !== undefined &&
+        stakeCharityIdRaw !== null &&
+        stakeCharityIdRaw !== "";
+
+      if (hasFriend && hasCharity) {
+        return jsonResponse(
+          { error: "Choose either a friend or a charity, not both" },
+          400,
+        );
+      }
+
+      let stakeRecipientUserId: string | null = null;
+      let stakeCharityId: string | null = null;
+
+      if (hasFriend) {
+        if (typeof stakeRecipientUserIdRaw !== "string") {
+          return jsonResponse({ error: "Invalid stake recipient" }, 400);
+        }
+        if (stakeRecipientUserIdRaw === userId) {
+          return jsonResponse({ error: "Stake cannot go to yourself" }, 400);
+        }
+        const { data: edge } = await supabase
+          .from("friendships")
+          .select("friend_user_id")
+          .eq("user_id", userId)
+          .eq("friend_user_id", stakeRecipientUserIdRaw)
+          .maybeSingle();
+        if (!edge?.friend_user_id) {
+          return jsonResponse({ error: "Stake recipient must be one of your friends" }, 400);
+        }
+        const { data: recipient } = await supabase
+          .from("profiles")
+          .select("id, stake_payouts_ready, stripe_connect_account_id")
+          .eq("id", stakeRecipientUserIdRaw)
+          .maybeSingle();
+        if (
+          !recipient?.stake_payouts_ready ||
+          !recipient?.stripe_connect_account_id
+        ) {
+          return jsonResponse(
+            { error: "That friend has not finished bank setup to receive stakes" },
+            400,
+          );
+        }
+        stakeRecipientUserId = stakeRecipientUserIdRaw;
+      }
+
+      if (hasCharity) {
+        if (typeof stakeCharityIdRaw !== "string") {
+          return jsonResponse({ error: "Invalid charity" }, 400);
+        }
+        const { data: charity } = await supabase
+          .from("charities")
+          .select("id, active, stake_payouts_ready, stripe_connect_account_id")
+          .eq("id", stakeCharityIdRaw)
+          .maybeSingle();
+        if (
+          !charity?.active ||
+          !charity?.stake_payouts_ready ||
+          !charity?.stripe_connect_account_id
+        ) {
+          return jsonResponse(
+            { error: "That charity is not available to receive stakes yet" },
+            400,
+          );
+        }
+        stakeCharityId = stakeCharityIdRaw;
+      }
+
       const { data: goal, error: insertError } = await supabase
         .from("goals")
         .insert({
@@ -228,6 +317,8 @@ serve(async (req: Request): Promise<Response> => {
           stripe_customer_id: customerId,
           payment_method_id: paymentMethodId,
           payment_status: "stored_for_later_capture",
+          stake_recipient_user_id: stakeRecipientUserId,
+          stake_charity_id: stakeCharityId,
         })
         .select("id")
         .single();

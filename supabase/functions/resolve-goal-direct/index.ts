@@ -1,6 +1,11 @@
 import Stripe from "npm:stripe@16.6.0";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.49.1";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import {
+  getDestinationConnectAccountId,
+  transferStakeToRecipientIfNeeded,
+  type GoalStakeFields,
+} from "../_shared/stripeStakePayout.ts";
 
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -28,14 +33,7 @@ function jsonOk(body: unknown) {
 async function settleFailedPayment(
   stripe: Stripe,
   supabase: ReturnType<typeof createClient>,
-  goal: {
-    id: string;
-    stake: number | null;
-    stake_currency?: string | null;
-    payment_intent_id?: string | null;
-    payment_method_id?: string | null;
-    stripe_customer_id?: string | null;
-  },
+  goal: GoalStakeFields,
 ) {
   const stake = Number(goal.stake ?? 0);
   if (stake <= 0) return;
@@ -49,6 +47,13 @@ async function settleFailedPayment(
       });
     }
     if (pi.status === "requires_capture" || pi.status === "succeeded") {
+      await transferStakeToRecipientIfNeeded(
+        stripe,
+        supabase,
+        goal,
+        piId,
+        `goal-transfer-${goal.id}`,
+      );
       const { error } = await supabase
         .from("goals")
         .update({ payment_status: "captured" })
@@ -75,7 +80,9 @@ async function settleFailedPayment(
 
   const currency = (goal.stake_currency ?? "usd").toLowerCase();
   const amount = Math.round(stake * 100);
-  const deferredPi = await stripe.paymentIntents.create({
+  const connectId = await getDestinationConnectAccountId(supabase, goal);
+
+  const createParams: Stripe.PaymentIntentCreateParams = {
     amount,
     currency,
     customer: customerId,
@@ -86,7 +93,12 @@ async function settleFailedPayment(
       goal_id: goal.id,
       settlement_reason: "failed_or_expired",
     },
-  }, {
+  };
+  if (connectId) {
+    createParams.transfer_data = { destination: connectId };
+  }
+
+  const deferredPi = await stripe.paymentIntents.create(createParams, {
     idempotencyKey: `goal-failed-${goal.id}`,
   });
 
@@ -157,7 +169,7 @@ serve(async (req: Request): Promise<Response> => {
 
     const { data: goal, error: goalError } = await supabase
       .from("goals")
-      .select("id,user_id,title,stake,stake_currency,deadline,status,is_private,judge_user_id,payment_intent_id,payment_method_id,stripe_customer_id,payment_status")
+      .select("id,user_id,title,stake,stake_currency,deadline,status,is_private,judge_user_id,payment_intent_id,payment_method_id,stripe_customer_id,payment_status,stake_recipient_user_id,stake_charity_id")
       .eq("id", goalId)
       .single();
 

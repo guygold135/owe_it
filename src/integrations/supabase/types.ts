@@ -22,6 +22,8 @@ export type Database = {
           friend_code: string | null
           id: string
           updated_at: string
+          stripe_connect_account_id: string | null
+          stake_payouts_ready: boolean
         }
         Insert: {
           avatar_url?: string | null
@@ -30,6 +32,8 @@ export type Database = {
           friend_code?: string | null
           id: string
           updated_at?: string
+          stripe_connect_account_id?: string | null
+          stake_payouts_ready?: boolean
         }
         Update: {
           avatar_url?: string | null
@@ -38,6 +42,8 @@ export type Database = {
           friend_code?: string | null
           id?: string
           updated_at?: string
+          stripe_connect_account_id?: string | null
+          stake_payouts_ready?: boolean
         }
         Relationships: []
       }

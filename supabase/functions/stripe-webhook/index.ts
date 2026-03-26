@@ -1,5 +1,5 @@
 import Stripe from "npm:stripe@16.6.0";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.49.1";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
@@ -34,6 +34,33 @@ serve(async (req: Request): Promise<Response> => {
     );
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    if (event.type === "account.updated") {
+      const account = event.data.object as Stripe.Account;
+      const accountId = account.id;
+      const appUserId = account.metadata?.app_user_id;
+      const ready = !!(account.details_submitted && account.payouts_enabled);
+
+      if (typeof appUserId === "string" && appUserId.length > 0) {
+        await supabase
+          .from("profiles")
+          .update({
+            stripe_connect_account_id: accountId,
+            stake_payouts_ready: ready,
+          })
+          .eq("id", appUserId);
+      } else {
+        await supabase
+          .from("profiles")
+          .update({ stake_payouts_ready: ready })
+          .eq("stripe_connect_account_id", accountId);
+      }
+
+      await supabase
+        .from("charities")
+        .update({ stake_payouts_ready: ready })
+        .eq("stripe_connect_account_id", accountId);
+    }
 
     if (event.type === "payment_intent.succeeded") {
       const pi = event.data.object as Stripe.PaymentIntent;

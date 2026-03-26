@@ -18,3 +18,15 @@ verify_jwt = false
 
 [functions.submit-feedback]
 verify_jwt = false
+
+[functions.stripe-connect-onboarding]
+verify_jwt = false
+
+[functions.rapyd-health]
+verify_jwt = false
+
+[functions.rapyd-webhook]
+verify_jwt = false
+
+[functions.rapyd-create-checkout]
+verify_jwt = false

@@ -23,6 +23,7 @@ import { JudgeRequestToastHost } from "@/components/JudgeRequestToastHost";
 import { JudgeGoalCreatedNoticeHost } from "@/components/JudgeGoalCreatedNoticeHost";
 import { DeadlineReminderToastHost } from "@/components/DeadlineReminderToastHost";
 import { AppVersionQuote } from "@/components/AppVersionQuote";
+import { PasswordRecoveryScreen } from "@/components/PasswordRecoveryScreen";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,11 +37,19 @@ const queryClient = new QueryClient({
 });
 
 function AppRoutes() {
-  const { user, loading } = useAuth();
+  const { user, loading, passwordRecoveryPending } = useAuth();
   const [createOpen, setCreateOpen] = useState(false);
   useAbandonStaleJudgeRequestsOnBootstrap(user?.id);
 
   if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (passwordRecoveryPending && !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
@@ -55,6 +64,10 @@ function AppRoutes() {
         <Route path="*" element={<Navigate to="/auth" replace />} />
       </Routes>
     );
+  }
+
+  if (passwordRecoveryPending) {
+    return <PasswordRecoveryScreen />;
   }
 
   return (

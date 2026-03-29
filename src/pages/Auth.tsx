@@ -7,7 +7,7 @@ import { Target, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 
 export default function Auth() {
-  const { signIn, signUp, signInWithOAuth } = useAuth();
+  const { signIn, signUp, signInWithOAuth, sendPasswordResetEmail } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -15,6 +15,7 @@ export default function Auth() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoadingProvider, setOauthLoadingProvider] = useState<'google' | 'apple' | null>(null);
+  const [resetSending, setResetSending] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,6 +32,23 @@ export default function Auth() {
       toast.error(error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const trimmed = email.trim();
+    if (!trimmed) {
+      toast.error('Enter your email address first.');
+      return;
+    }
+    setResetSending(true);
+    try {
+      await sendPasswordResetEmail(trimmed);
+      toast.success('Check your email for a link to reset your password.');
+    } catch (error: any) {
+      toast.error(error?.message ?? 'Could not send reset email.');
+    } finally {
+      setResetSending(false);
     }
   };
 
@@ -135,6 +153,19 @@ export default function Auth() {
               {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
+
+          {mode === 'signin' && (
+            <div className="flex justify-end -mt-1">
+              <button
+                type="button"
+                onClick={() => void handleForgotPassword()}
+                disabled={resetSending}
+                className="text-xs text-primary font-medium hover:underline disabled:opacity-50"
+              >
+                {resetSending ? 'Sending…' : 'Forgot password?'}
+              </button>
+            </div>
+          )}
 
           <Button
             type="submit"

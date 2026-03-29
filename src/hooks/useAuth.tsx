@@ -1,4 +1,11 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { decodeJwtPayload } from '@/lib/jwtPayload';
+import {
+  clearPendingPasswordRecoveryFlag,
+  hasPendingPasswordRecoveryFlag,
+} from '@/lib/sessionBootstrap';
+import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
 type AuthUser = {
@@ -10,18 +17,59 @@ type AuthUser = {
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
+  passwordRecoveryPending: boolean;
   signUp: (email: string, password: string, displayName?: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithOAuth: (provider: 'google' | 'apple') => Promise<void>;
   signOut: () => Promise<void>;
+  sendPasswordResetEmail: (email: string) => Promise<void>;
+  updatePassword: (newPassword: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/** True when the current URL is a Supabase password-recovery redirect (hash or query). */
+function urlHasRecoveryType(): boolean {
+  if (typeof window === 'undefined') return false;
+  const { hash, search } = window.location;
+  return hash.includes('type=recovery') || search.includes('type=recovery');
+}
+
+/**
+ * Recovery sessions use `amr` as string[] (RFC) or AMREntry[] with `method: 'recovery'`.
+ * JWTs use base64url — must not use raw atob(token.split('.')[1]).
+ */
+function sessionAccessTokenIndicatesPasswordRecovery(session: { access_token?: string } | null): boolean {
+  const token = session?.access_token;
+  if (!token) return false;
+  const payload = decodeJwtPayload(token);
+  if (!payload) return false;
+  let amr: unknown = payload.amr;
+  if (typeof amr === 'string') {
+    try {
+      amr = JSON.parse(amr);
+    } catch {
+      return false;
+    }
+  }
+  if (!Array.isArray(amr)) return false;
+  for (const entry of amr) {
+    if (entry === 'recovery') return true;
+    if (entry && typeof entry === 'object' && 'method' in entry) {
+      if ((entry as { method: string }).method === 'recovery') return true;
+    }
+  }
+  return false;
+}
+
 function useProvideAuth(): AuthContextValue {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [passwordRecoveryPending, setPasswordRecoveryPending] = useState(
+    () => urlHasRecoveryType() || hasPendingPasswordRecoveryFlag(),
+  );
   const ensuredProfileForUserRef = useRef<string | null>(null);
+  const recoveryFromUrlRef = useRef(urlHasRecoveryType() || hasPendingPasswordRecoveryFlag());
 
   useEffect(() => {
     let alive = true;
@@ -62,10 +110,38 @@ function useProvideAuth(): AuthContextValue {
       };
     };
 
+    const applyRecoveryDetection = (session: Session | null) => {
+      if (!session?.user) return;
+      const fromJwt = sessionAccessTokenIndicatesPasswordRecovery(session);
+      const fromFlag = hasPendingPasswordRecoveryFlag();
+      const fromRef = recoveryFromUrlRef.current;
+      if (fromJwt || fromFlag || fromRef) {
+        setPasswordRecoveryPending(true);
+        recoveryFromUrlRef.current = false;
+        clearPendingPasswordRecoveryFlag();
+      }
+    };
+
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       if (!alive) return;
+      if (event === 'SIGNED_OUT') {
+        setPasswordRecoveryPending(false);
+        recoveryFromUrlRef.current = false;
+        clearPendingPasswordRecoveryFlag();
+        setUser(null);
+        void ensureProfile(null);
+        setLoading(false);
+        return;
+      }
+      if (event === 'PASSWORD_RECOVERY' && session?.user) {
+        setPasswordRecoveryPending(true);
+        recoveryFromUrlRef.current = false;
+        clearPendingPasswordRecoveryFlag();
+      } else if (session?.user) {
+        applyRecoveryDetection(session);
+      }
       setUser(mapUser(session?.user ?? null));
       void ensureProfile(session?.user ?? null);
       setLoading(false);
@@ -81,12 +157,22 @@ function useProvideAuth(): AuthContextValue {
         ]);
         if (!alive) return;
         const session = (result as Awaited<ReturnType<typeof supabase.auth.getSession>>).data.session;
+        if (session?.user) {
+          applyRecoveryDetection(session);
+        } else if (recoveryFromUrlRef.current || hasPendingPasswordRecoveryFlag()) {
+          setPasswordRecoveryPending(false);
+          recoveryFromUrlRef.current = false;
+          clearPendingPasswordRecoveryFlag();
+        }
         setUser(mapUser(session?.user ?? null));
         void ensureProfile(session?.user ?? null);
       } catch (err) {
         if (!alive) return;
         console.error('Auth bootstrap error', err);
         setUser(null);
+        setPasswordRecoveryPending(false);
+        recoveryFromUrlRef.current = false;
+        clearPendingPasswordRecoveryFlag();
       } finally {
         if (alive) setLoading(false);
       }
@@ -158,9 +244,37 @@ function useProvideAuth(): AuthContextValue {
     if (error) throw error;
   };
 
+  const sendPasswordResetEmail = async (email: string) => {
+    const trimmed = email.trim();
+    const redirectTo = Capacitor.isNativePlatform()
+      ? `${window.location.origin}/#/auth`
+      : `${window.location.origin}/auth`;
+    const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
+      redirectTo,
+    });
+    if (error) throw error;
+  };
+
+  const updatePassword = async (newPassword: string) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+    setPasswordRecoveryPending(false);
+    clearPendingPasswordRecoveryFlag();
+  };
+
   return useMemo(
-    () => ({ user, loading, signUp, signIn, signInWithOAuth, signOut }),
-    [user, loading],
+    () => ({
+      user,
+      loading,
+      passwordRecoveryPending,
+      signUp,
+      signIn,
+      signInWithOAuth,
+      signOut,
+      sendPasswordResetEmail,
+      updatePassword,
+    }),
+    [user, loading, passwordRecoveryPending],
   );
 }
 

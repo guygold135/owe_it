@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { Target, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+import { consumeAuthRedirectError } from '@/lib/sessionBootstrap';
 
 export default function Auth() {
   const { signIn, signUp, signInWithOAuth, sendPasswordResetEmail } = useAuth();
@@ -16,6 +17,25 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
   const [oauthLoadingProvider, setOauthLoadingProvider] = useState<'google' | 'apple' | null>(null);
   const [resetSending, setResetSending] = useState(false);
+
+  useEffect(() => {
+    const redirectErr = consumeAuthRedirectError();
+    if (redirectErr) {
+      const desc = redirectErr.errorDescription
+        ? decodeURIComponent(redirectErr.errorDescription.replace(/\+/g, ' '))
+        : '';
+      if (redirectErr.errorCode === 'otp_expired') {
+        toast.error(
+          'That reset link has expired or was already used. Request a new password reset below.',
+        );
+      } else {
+        toast.error(desc || 'This sign-in link is invalid. Try again or request a new email.');
+      }
+    }
+    if (typeof window !== 'undefined' && window.location.hash.includes('error=')) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

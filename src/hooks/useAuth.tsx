@@ -246,9 +246,10 @@ function useProvideAuth(): AuthContextValue {
 
   const sendPasswordResetEmail = async (email: string) => {
     const trimmed = email.trim();
+    // Use site root on web so the link is https://domain/#tokens — always serves index.html (avoids static-host 404 on /auth).
     const redirectTo = Capacitor.isNativePlatform()
       ? `${window.location.origin}/#/auth`
-      : `${window.location.origin}/auth`;
+      : `${window.location.origin}/`;
     const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
       redirectTo,
     });

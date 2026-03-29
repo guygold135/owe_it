@@ -1,7 +1,22 @@
+import { readFileSync } from "node:fs";
+import path from "path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
-import path from "path";
 import { componentTagger } from "lovable-tagger";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(
+  readFileSync(path.join(__dirname, "package.json"), "utf-8"),
+) as { version: string };
+
+const gitShaRaw =
+  process.env.VERCEL_GIT_COMMIT_SHA ??
+  process.env.GITHUB_SHA ??
+  process.env.COMMIT_REF ??
+  process.env.VITE_GIT_SHA ??
+  "";
+const gitShaShort = gitShaRaw ? gitShaRaw.slice(0, 7) : "";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -23,5 +38,9 @@ export default defineConfig(({ mode }) => ({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+  },
+  define: {
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(pkg.version),
+    "import.meta.env.VITE_GIT_SHA": JSON.stringify(gitShaShort),
   },
 }));

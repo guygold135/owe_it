@@ -22,6 +22,7 @@ import NotFound from "./pages/NotFound";
 import { JudgeRequestToastHost } from "@/components/JudgeRequestToastHost";
 import { JudgeGoalCreatedNoticeHost } from "@/components/JudgeGoalCreatedNoticeHost";
 import { DeadlineReminderToastHost } from "@/components/DeadlineReminderToastHost";
+import { AppVersionQuote } from "@/components/AppVersionQuote";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -89,6 +90,7 @@ const App = () => {
         <TooltipProvider>
           <Toaster />
           <Sonner />
+          <AppVersionQuote />
           <Router>
             <AppRoutes />
           </Router>

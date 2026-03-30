@@ -8,15 +8,18 @@ import { useAuth } from '@/hooks/useAuth';
 import { consumeAuthRedirectError } from '@/lib/sessionBootstrap';
 
 export default function Auth() {
-  const { signIn, signUp, signInWithOAuth, sendPasswordResetEmail } = useAuth();
+  const { signIn, signUp, signInWithOAuth, sendPasswordResetEmail, resendSignupConfirmation } =
+    useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
+  const [emailPendingConfirmation, setEmailPendingConfirmation] = useState<string | null>(null);
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoadingProvider, setOauthLoadingProvider] = useState<'google' | 'apple' | null>(null);
   const [resetSending, setResetSending] = useState(false);
+  const [resendConfirmBusy, setResendConfirmBusy] = useState(false);
 
   useEffect(() => {
     const redirectErr = consumeAuthRedirectError();
@@ -43,10 +46,25 @@ export default function Auth() {
 
     try {
       if (mode === 'signup') {
-        await signUp(email, password, displayName);
-        toast.success('Account created and signed in!');
+        const outcome = await signUp(email, password, displayName);
+        if (outcome === 'confirm_email') {
+          toast.success('Check your email to confirm your account, then sign in here.');
+          setMode('signin');
+          setEmailPendingConfirmation(email.trim());
+        } else if (outcome === 'repeat_signup') {
+          setMode('signin');
+          setEmailPendingConfirmation(email.trim());
+          toast.info(
+            'This email is already registered. A second signup does not send another email. Sign in below, or use “Resend confirmation email” if you still need to verify.',
+            { duration: 8000 },
+          );
+        } else {
+          setEmailPendingConfirmation(null);
+          toast.success('Account created and signed in!');
+        }
       } else {
         await signIn(email, password);
+        setEmailPendingConfirmation(null);
       }
     } catch (error: any) {
       toast.error(error.message);
@@ -69,6 +87,23 @@ export default function Auth() {
       toast.error(error?.message ?? 'Could not send reset email.');
     } finally {
       setResetSending(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    const target = emailPendingConfirmation ?? email.trim();
+    if (!target) {
+      toast.error('Enter the email you used to sign up.');
+      return;
+    }
+    setResendConfirmBusy(true);
+    try {
+      await resendSignupConfirmation(target);
+      toast.success('Sent again. Check spam and promotions folders.');
+    } catch (error: any) {
+      toast.error(error?.message ?? 'Could not resend the email.');
+    } finally {
+      setResendConfirmBusy(false);
     }
   };
 
@@ -202,6 +237,22 @@ export default function Auth() {
             )}
           </Button>
         </form>
+
+        {emailPendingConfirmation && mode === 'signin' && (
+          <div className="mt-4 rounded-2xl border border-border bg-card/50 px-4 py-3 text-center">
+            <p className="text-xs text-muted-foreground mb-2">
+              Check spam or promotions. Still nothing? Resend below.
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleResendConfirmation()}
+              disabled={resendConfirmBusy}
+              className="text-xs text-primary font-medium hover:underline disabled:opacity-50"
+            >
+              {resendConfirmBusy ? 'Sending…' : 'Resend confirmation email'}
+            </button>
+          </div>
+        )}
 
         <div className="my-6 flex items-center gap-3">
           <div className="h-px flex-1 bg-border" />

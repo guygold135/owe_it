@@ -47,22 +47,37 @@ export default function Settings() {
 
   const handleDeleteAccount = async () => {
     if (!user) return;
+
+    const confirmed = window.confirm(
+      'Permanently delete your account? This removes your Supabase auth user and related rows (goals, friendships, pulse, notifications, feedback, judge requests, etc.). This cannot be undone.',
+    );
+    if (!confirmed) return;
+
     setLoading(true);
 
     try {
-      // Delete all user-related data we can access from the client
-      await supabase.from('goals').delete().eq('user_id', user.id);
-      await supabase.from('friends').delete().eq('owner_id', user.id).or(`user_id.eq.${user.id}`);
+      const { data, error } = await supabase.functions.invoke('delete-account', {
+        method: 'POST',
+        body: {},
+      });
 
-      // Mark profile as deleted if profiles table exists
-      await supabase.from('profiles').update({ display_name: '[deleted]' }).eq('id', user.id);
+      if (error) {
+        throw new Error(error.message || 'Account deletion failed.');
+      }
+      if (data && typeof data === 'object' && 'error' in data && data.error) {
+        throw new Error(String((data as { error: string }).error));
+      }
 
       await signOut();
-      toast.success('Your data has been removed from this app.');
+      toast.success('Your account and app data have been deleted.');
       navigate('/auth', { replace: true });
     } catch (error: any) {
       console.error('Error deleting account', error);
-      toast.error('Could not delete account. Please try again.');
+      const msg = error?.message ?? 'Could not delete account.';
+      toast.error(
+        `${msg} If you are the project owner, deploy the Edge Function: supabase functions deploy delete-account`,
+        { duration: 12_000 },
+      );
     } finally {
       setLoading(false);
     }
@@ -163,7 +178,8 @@ export default function Settings() {
             <div>
               <p className="text-sm font-medium text-foreground">Delete account</p>
               <p className="text-xs text-muted-foreground">
-                This will remove your goals and related data from this app and sign you out.
+                Permanently removes your login and related data stored for this app (goals, friends,
+                notifications, activity, and more), then signs you out.
               </p>
             </div>
           </div>

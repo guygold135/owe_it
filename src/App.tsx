@@ -18,6 +18,7 @@ import History from "./pages/History";
 import MyJudges from "./pages/MyJudges";
 import Profile from "./pages/Profile";
 import Feedback from "./pages/Feedback";
+import AdminFeedback from "./pages/AdminFeedback";
 import NotFound from "./pages/NotFound";
 import { JudgeRequestToastHost } from "@/components/JudgeRequestToastHost";
 import { JudgeGoalCreatedNoticeHost } from "@/components/JudgeGoalCreatedNoticeHost";
@@ -81,6 +82,7 @@ function AppRoutes() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/feedback" element={<Feedback />} />
+        <Route path="/admin-feedback" element={<AdminFeedback />} />
         <Route path="/auth" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

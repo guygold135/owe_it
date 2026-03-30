@@ -18,3 +18,9 @@ verify_jwt = false
 
 [functions.submit-feedback]
 verify_jwt = false
+
+[functions.delete-account]
+verify_jwt = false
+
+[functions.admin-feedback]
+verify_jwt = false

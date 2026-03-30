@@ -14,15 +14,22 @@ type AuthUser = {
   displayName?: string;
 };
 
+/**
+ * `confirm_email` — new user; must confirm via link.
+ * `repeat_signup` — email already registered; Supabase does not send another signup confirmation on this request (see `user_repeated_signup` in logs).
+ */
+export type SignUpOutcome = 'signed_in' | 'confirm_email' | 'repeat_signup';
+
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
   passwordRecoveryPending: boolean;
-  signUp: (email: string, password: string, displayName?: string) => Promise<void>;
+  signUp: (email: string, password: string, displayName?: string) => Promise<SignUpOutcome>;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithOAuth: (provider: 'google' | 'apple') => Promise<void>;
   signOut: () => Promise<void>;
   sendPasswordResetEmail: (email: string) => Promise<void>;
+  resendSignupConfirmation: (email: string) => Promise<void>;
   updatePassword: (newPassword: string) => Promise<void>;
 };
 
@@ -110,16 +117,43 @@ function useProvideAuth(): AuthContextValue {
       };
     };
 
-    const applyRecoveryDetection = (session: Session | null) => {
-      if (!session?.user) return;
+    /**
+     * Controls whether this *tab* should show PasswordRecoveryScreen.
+     *
+     * - `hasPendingPasswordRecoveryFlag()` / `recoveryFromUrlRef.current` are only set in the tab
+     *   that visited the recovery link (captured in `src/lib/sessionBootstrap.ts` before React runs).
+     * - Some auth artifacts are shared across tabs (Supabase session storage). When a recovery
+     *   session appears in other tabs, we sign those tabs out instead of flipping their UI.
+     */
+    const applyRecoveryDetection = (session: Session | null): boolean => {
+      if (!session?.user) return true;
       const fromJwt = sessionAccessTokenIndicatesPasswordRecovery(session);
       const fromFlag = hasPendingPasswordRecoveryFlag();
       const fromRef = recoveryFromUrlRef.current;
-      if (fromJwt || fromFlag || fromRef) {
+
+      // This tab explicitly came from a recovery link: show the recovery UI and keep the
+      // pending flag until the user actually updates their password.
+      if (fromFlag || fromRef) {
         setPasswordRecoveryPending(true);
+        recoveryFromUrlRef.current = false; // consume in-memory intent; keep sessionStorage flag
+        return true;
+      }
+
+      // Another tab picked up a recovery session but wasn't started via the recovery link:
+      // prevent it from being treated as "signed in".
+      if (fromJwt) {
+        setPasswordRecoveryPending(false);
         recoveryFromUrlRef.current = false;
         clearPendingPasswordRecoveryFlag();
+        setUser(null);
+        void ensureProfile(null);
+        void supabase.auth.signOut();
+        return false;
       }
+
+      // Normal session for this tab.
+      setPasswordRecoveryPending(false);
+      return true;
     };
 
     const {
@@ -135,12 +169,12 @@ function useProvideAuth(): AuthContextValue {
         setLoading(false);
         return;
       }
-      if (event === 'PASSWORD_RECOVERY' && session?.user) {
-        setPasswordRecoveryPending(true);
-        recoveryFromUrlRef.current = false;
-        clearPendingPasswordRecoveryFlag();
-      } else if (session?.user) {
-        applyRecoveryDetection(session);
+      if (session?.user) {
+        const ok = applyRecoveryDetection(session);
+        if (!ok) {
+          setLoading(false);
+          return;
+        }
       }
       setUser(mapUser(session?.user ?? null));
       void ensureProfile(session?.user ?? null);
@@ -158,7 +192,8 @@ function useProvideAuth(): AuthContextValue {
         if (!alive) return;
         const session = (result as Awaited<ReturnType<typeof supabase.auth.getSession>>).data.session;
         if (session?.user) {
-          applyRecoveryDetection(session);
+          const ok = applyRecoveryDetection(session);
+          if (!ok) return;
         } else if (recoveryFromUrlRef.current || hasPendingPasswordRecoveryFlag()) {
           setPasswordRecoveryPending(false);
           recoveryFromUrlRef.current = false;
@@ -186,18 +221,21 @@ function useProvideAuth(): AuthContextValue {
     };
   }, []);
 
+  const authEmailRedirectTo = () =>
+    Capacitor.isNativePlatform()
+      ? `${window.location.origin}/#/`
+      : `${window.location.origin}/`;
+
   const signUp = async (email: string, password: string, displayName?: string) => {
-    // First try to sign the user up.
-    const { error: signUpError } = await supabase.auth.signUp({
+    const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: { display_name: displayName },
+        emailRedirectTo: authEmailRedirectTo(),
       },
     });
 
-    // If Supabase says the user is already registered or email rate-limited,
-    // fall back to a normal sign-in so the user can still get in.
     const shouldFallbackToSignIn =
       signUpError &&
       typeof signUpError.message === 'string' &&
@@ -211,22 +249,47 @@ function useProvideAuth(): AuthContextValue {
       throw signUpError;
     }
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (signInError) {
-      throw signInError;
+    if (signUpError && shouldFallbackToSignIn) {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (signInError) throw signInError;
+      return 'signed_in';
     }
+
+    if (!data?.user) {
+      throw new Error('Sign up failed.');
+    }
+    if (data.session) {
+      return 'signed_in';
+    }
+    // Duplicate signup: same email already exists — GoTrue logs `user_repeated_signup` and does not send another confirmation email.
+    const identities = data.user.identities ?? [];
+    if (identities.length === 0) {
+      return 'repeat_signup';
+    }
+    return 'confirm_email';
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
     if (error) throw error;
+    const u = data.user;
+    if (!u) return;
+    // If Supabase allows sessions before confirmation, block until email_confirmed_at is set (email provider only).
+    const usesEmailProvider =
+      u.identities?.some((i) => i.provider === 'email') ||
+      u.app_metadata?.provider === 'email';
+    if (usesEmailProvider && !u.email_confirmed_at) {
+      await supabase.auth.signOut();
+      throw new Error(
+        'Confirm your email before signing in. Check your inbox and spam folder, or use “Resend confirmation email” below.',
+      );
+    }
   };
 
   const signInWithOAuth = async (provider: 'google' | 'apple') => {
@@ -246,7 +309,6 @@ function useProvideAuth(): AuthContextValue {
 
   const sendPasswordResetEmail = async (email: string) => {
     const trimmed = email.trim();
-    // Use site root on web so the link is https://domain/#tokens — always serves index.html (avoids static-host 404 on /auth).
     const redirectTo = Capacitor.isNativePlatform()
       ? `${window.location.origin}/#/auth`
       : `${window.location.origin}/`;
@@ -256,11 +318,22 @@ function useProvideAuth(): AuthContextValue {
     if (error) throw error;
   };
 
+  const resendSignupConfirmation = async (email: string) => {
+    const trimmed = email.trim();
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: trimmed,
+      options: { emailRedirectTo: authEmailRedirectTo() },
+    });
+    if (error) throw error;
+  };
+
   const updatePassword = async (newPassword: string) => {
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) throw error;
     setPasswordRecoveryPending(false);
     clearPendingPasswordRecoveryFlag();
+    recoveryFromUrlRef.current = false;
   };
 
   return useMemo(
@@ -273,6 +346,7 @@ function useProvideAuth(): AuthContextValue {
       signInWithOAuth,
       signOut,
       sendPasswordResetEmail,
+      resendSignupConfirmation,
       updatePassword,
     }),
     [user, loading, passwordRecoveryPending],

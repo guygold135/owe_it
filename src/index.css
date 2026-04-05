@@ -16,6 +16,8 @@
 
 @layer base {
   :root {
+    /* Native date/time/calendar popovers follow this (Chromium, Safari, etc.). */
+    color-scheme: dark;
     --background: 220 20% 14%;
     --foreground: 220 10% 96%;
 

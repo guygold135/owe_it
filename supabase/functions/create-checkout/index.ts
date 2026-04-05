@@ -1,6 +1,13 @@
 import Stripe from "npm:stripe@16.6.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import {
+  normalizeStakeCurrency as normalizeStakeCurrencyShared,
+  resolveMinimumStakeMajor,
+  stakeMajorToStripeUnits,
+  stripeUnitsToStakeMajor,
+} from "../_shared/stripe-money.ts";
+import { DEFAULT_CHARITY_ID, isValidCharityId } from "../_shared/charities.ts";
 
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -16,60 +23,6 @@ const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
 };
-
-const supportedCurrencies = new Set([
-  "usd",
-  "eur",
-  "gbp",
-  "cad",
-  "aud",
-  "nzd",
-  "chf",
-  "sek",
-  "nok",
-  "dkk",
-  "pln",
-  "czk",
-  "huf",
-  "ron",
-  "bgn",
-  "hrk",
-  "isk",
-  "try",
-  "ils",
-  "aed",
-  "sar",
-  "qar",
-  "bhd",
-  "omr",
-  "jod",
-  "egp",
-  "mad",
-  "zar",
-  "kes",
-  "ngn",
-  "inr",
-  "pkr",
-  "bdt",
-  "lkr",
-  "thb",
-  "myr",
-  "sgd",
-  "hkd",
-  "jpy",
-  "twd",
-  "krw",
-  "vnd",
-  "php",
-  "idr",
-  "brl",
-  "mxn",
-  "ars",
-  "clp",
-  "cop",
-  "pen",
-  "uyu",
-]);
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -127,27 +80,49 @@ serve(async (req: Request): Promise<Response> => {
         judgeName,
         judgeUserId,
         isPrivate,
-        amount: amountInCents,
+        amount: stripeAmountRaw,
         currency,
+        charityId: charityIdRaw,
       } = body;
 
-      const normalizedCurrency =
-        typeof currency === "string" && supportedCurrencies.has(currency.toLowerCase())
-          ? currency.toLowerCase()
-          : "usd";
+      const normalizedCurrency = normalizeStakeCurrencyShared(currency);
+      const charityId =
+        typeof charityIdRaw === "string" && isValidCharityId(charityIdRaw)
+          ? charityIdRaw
+          : DEFAULT_CHARITY_ID;
 
       if (
         !paymentMethodId ||
         !userId ||
         !goalTitle ||
-        typeof amountInCents !== "number" ||
-        !Number.isFinite(amountInCents) ||
-        amountInCents <= 0
+        typeof stripeAmountRaw !== "number" ||
+        !Number.isFinite(stripeAmountRaw) ||
+        stripeAmountRaw <= 0
       ) {
         return jsonResponse(
           { error: "Missing or invalid fields for in-app payment" },
           400
         );
+      }
+
+      const stakeMajor = stripeUnitsToStakeMajor(
+        Math.trunc(stripeAmountRaw),
+        normalizedCurrency,
+      );
+      const minMajor = await resolveMinimumStakeMajor(normalizedCurrency);
+      if (stakeMajor > 0 && stakeMajor + 1e-9 < minMajor) {
+        return jsonResponse(
+          {
+            error:
+              `Minimum stake is ${minMajor} ${normalizedCurrency.toUpperCase()} (at least US$1).`,
+          },
+          400,
+        );
+      }
+
+      const expectedUnits = stakeMajorToStripeUnits(stakeMajor, normalizedCurrency);
+      if (Math.trunc(stripeAmountRaw) !== expectedUnits) {
+        return jsonResponse({ error: "Invalid stake amount for currency" }, 400);
       }
 
       if (userId !== authUserId) {
@@ -210,27 +185,39 @@ serve(async (req: Request): Promise<Response> => {
       }
 
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
-      const stakeDollars = amountInCents / 100;
 
-      const { data: goal, error: insertError } = await supabase
+      let insertPayload: Record<string, unknown> = {
+        user_id: userId,
+        title: goalTitle,
+        description: description ?? "",
+        stake: stakeMajor,
+        deadline: deadline,
+        status: "active",
+        judge_name: judgeName ?? null,
+        judge_user_id: judgeUserId ?? null,
+        is_private: !!isPrivate,
+        stake_currency: normalizedCurrency,
+        stripe_customer_id: customerId,
+        payment_method_id: paymentMethodId,
+        payment_status: "stored_for_later_capture",
+        charity_id: charityId,
+      };
+
+      let { data: goal, error: insertError } = await supabase
         .from("goals")
-        .insert({
-          user_id: userId,
-          title: goalTitle,
-          description: description ?? "",
-          stake: stakeDollars,
-          deadline: deadline,
-          status: "active",
-          judge_name: judgeName ?? null,
-          judge_user_id: judgeUserId ?? null,
-          is_private: !!isPrivate,
-          stake_currency: normalizedCurrency,
-          stripe_customer_id: customerId,
-          payment_method_id: paymentMethodId,
-          payment_status: "stored_for_later_capture",
-        })
+        .insert(insertPayload)
         .select("id")
         .single();
+
+      if (
+        insertError &&
+        String(insertError.message ?? "").toLowerCase().includes("charity_id")
+      ) {
+        const { charity_id: _c, ...withoutCharity } = insertPayload;
+        const retry = await supabase.from("goals").insert(withoutCharity).select("id").single();
+        goal = retry.data;
+        insertError = retry.error;
+      }
 
       let goalId = goal?.id as string | undefined;
       if (insertError) {
@@ -257,10 +244,7 @@ serve(async (req: Request): Promise<Response> => {
     }
 
     const { amount, goalTitle, successUrl, cancelUrl } = body;
-    const normalizedCurrency =
-      typeof body?.currency === "string" && supportedCurrencies.has(body.currency.toLowerCase())
-        ? body.currency.toLowerCase()
-        : "usd";
+    const normalizedCurrency = normalizeStakeCurrencyShared(body?.currency);
 
     if (
       typeof amount !== "number" ||
@@ -268,6 +252,21 @@ serve(async (req: Request): Promise<Response> => {
       amount <= 0
     ) {
       return jsonResponse({ error: "Invalid amount" }, 400);
+    }
+
+    const checkoutStakeMajor = stripeUnitsToStakeMajor(Math.trunc(amount), normalizedCurrency);
+    const checkoutMin = await resolveMinimumStakeMajor(normalizedCurrency);
+    if (checkoutStakeMajor > 0 && checkoutStakeMajor + 1e-9 < checkoutMin) {
+      return jsonResponse(
+        {
+          error:
+            `Minimum stake is ${checkoutMin} ${normalizedCurrency.toUpperCase()} (at least US$1).`,
+        },
+        400,
+      );
+    }
+    if (stakeMajorToStripeUnits(checkoutStakeMajor, normalizedCurrency) !== Math.trunc(amount)) {
+      return jsonResponse({ error: "Invalid amount for currency" }, 400);
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -279,7 +278,7 @@ serve(async (req: Request): Promise<Response> => {
             product_data: {
               name: goalTitle || "Goal stake",
             },
-            unit_amount: amount,
+            unit_amount: Math.trunc(amount),
           },
           quantity: 1,
         },

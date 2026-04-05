@@ -52,13 +52,6 @@ export default function Dashboard() {
       {/* Header */}
       <div className="px-6 pt-12 pb-6 flex items-start justify-between gap-4">
         <div>
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-xs uppercase tracking-widest text-muted-foreground"
-          >
-            Owe It
-          </motion.p>
           <motion.h1
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}

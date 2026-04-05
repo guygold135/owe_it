@@ -4,6 +4,8 @@ export interface Goal {
   description: string;
   stake: number;
   stakeCurrency: string;
+  /** Matches `charities.ts` / server CHARITIES `id`; null for legacy rows or free goals */
+  charityId?: string | null;
   deadline: Date;
   createdAt: Date;
   /** Set when the goal is resolved (completed / failed); from DB `resolved_at`. */

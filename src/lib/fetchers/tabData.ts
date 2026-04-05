@@ -19,6 +19,7 @@ type GoalRow = {
   description: string | null;
   stake: number;
   stake_currency?: string | null;
+  charity_id?: string | null;
   deadline: string;
   created_at: string;
   resolved_at: string | null;
@@ -47,6 +48,7 @@ function mapRowToGoal(row: GoalRow, avatarById: Map<string, string | null>): Goa
     description: row.description ?? '',
     stake: row.stake,
     stakeCurrency: normalizeStakeCurrency(row.stake_currency),
+    charityId: row.charity_id ?? null,
     deadline: new Date(row.deadline),
     createdAt: new Date(row.created_at),
     resolvedAt: row.resolved_at ? new Date(row.resolved_at) : null,
@@ -57,7 +59,8 @@ function mapRowToGoal(row: GoalRow, avatarById: Map<string, string | null>): Goa
 }
 
 export async function fetchUserGoals(userId: string): Promise<Goal[]> {
-  const fieldsWithCurrency = 'id,title,description,stake,stake_currency,deadline,created_at,resolved_at,status,judge_name,is_private,user_id,judge_user_id';
+  const fieldsWithCurrency =
+    'id,title,description,stake,stake_currency,charity_id,deadline,created_at,resolved_at,status,judge_name,is_private,user_id,judge_user_id';
   const fallbackFields = 'id,title,description,stake,deadline,created_at,resolved_at,status,judge_name,is_private,user_id,judge_user_id';
 
   let { data, error } = await supabase
@@ -66,7 +69,8 @@ export async function fetchUserGoals(userId: string): Promise<Goal[]> {
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
 
-  if (error && String((error as { message?: unknown })?.message ?? '').toLowerCase().includes('stake_currency')) {
+  const errMsg = String((error as { message?: unknown })?.message ?? '').toLowerCase();
+  if (error && (errMsg.includes('stake_currency') || errMsg.includes('charity_id'))) {
     const retry = await supabase
       .from('goals')
       .select(fallbackFields)
@@ -117,6 +121,7 @@ function mapJudgeRowToGoal(row: JudgeGoalRow, creatorName: string): JudgeGoal {
     description: row.description ?? '',
     stake: row.stake,
     stakeCurrency: normalizeStakeCurrency(row.stake_currency),
+    charityId: row.charity_id ?? null,
     deadline: new Date(row.deadline),
     createdAt: new Date(row.created_at),
     resolvedAt: row.resolved_at ? new Date(row.resolved_at) : null,
@@ -129,7 +134,8 @@ function mapJudgeRowToGoal(row: JudgeGoalRow, creatorName: string): JudgeGoal {
 }
 
 export async function fetchGoalsAsJudge(userId: string): Promise<JudgeGoal[]> {
-  const fieldsWithCurrency = 'id,title,description,stake,stake_currency,deadline,created_at,resolved_at,status,judge_name,is_private,user_id';
+  const fieldsWithCurrency =
+    'id,title,description,stake,stake_currency,charity_id,deadline,created_at,resolved_at,status,judge_name,is_private,user_id';
   const fallbackFields = 'id,title,description,stake,deadline,created_at,resolved_at,status,judge_name,is_private,user_id';
 
   let { data: rows, error } = await supabase
@@ -138,7 +144,8 @@ export async function fetchGoalsAsJudge(userId: string): Promise<JudgeGoal[]> {
     .eq('judge_user_id', userId)
     .order('created_at', { ascending: false });
 
-  if (error && String((error as { message?: unknown })?.message ?? '').toLowerCase().includes('stake_currency')) {
+  const judgeErrMsg = String((error as { message?: unknown })?.message ?? '').toLowerCase();
+  if (error && (judgeErrMsg.includes('stake_currency') || judgeErrMsg.includes('charity_id'))) {
     const retry = await supabase
       .from('goals')
       .select(fallbackFields)

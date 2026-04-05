@@ -4,15 +4,27 @@ import { motion } from 'framer-motion';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { SUPPORTED_STAKE_CURRENCIES, formatStakeCurrencyLabel, type StakeCurrency } from '@/lib/currency';
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
 import { useShortDeadlineTesting } from '@/hooks/useShortDeadlineTesting';
+import { useGoals } from '@/hooks/useGoals';
 
 export default function Settings() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const { goals } = useGoals();
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const { currency, setCurrency } = useStakeCurrencyPreference();
   const { enabled: allowShortDeadlines, setEnabled: setAllowShortDeadlines } = useShortDeadlineTesting();
@@ -45,13 +57,14 @@ export default function Settings() {
     return () => window.removeEventListener('mousedown', onPointerDown);
   }, [currency]);
 
-  const handleDeleteAccount = async () => {
-    if (!user) return;
+  const activeStakesGoals = useMemo(
+    () => goals.filter((g) => g.status === 'active' && g.stake > 0),
+    [goals],
+  );
+  const activeStakesCount = activeStakesGoals.length;
 
-    const confirmed = window.confirm(
-      'Permanently delete your account? This removes your Supabase auth user and related rows (goals, friendships, pulse, notifications, feedback, judge requests, etc.). This cannot be undone.',
-    );
-    if (!confirmed) return;
+  const confirmDeleteAccount = async () => {
+    if (!user) return;
 
     setLoading(true);
 
@@ -68,12 +81,13 @@ export default function Settings() {
         throw new Error(String((data as { error: string }).error));
       }
 
+      setDeleteDialogOpen(false);
       await signOut();
       toast.success('Your account and app data have been deleted.');
       navigate('/auth', { replace: true });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error deleting account', error);
-      const msg = error?.message ?? 'Could not delete account.';
+      const msg = error instanceof Error ? error.message : 'Could not delete account.';
       toast.error(
         `${msg} If you are the project owner, deploy the Edge Function: supabase functions deploy delete-account`,
         { duration: 12_000 },
@@ -187,12 +201,65 @@ export default function Settings() {
             variant="destructive"
             className="w-full"
             disabled={loading}
-            onClick={handleDeleteAccount}
+            onClick={() => setDeleteDialogOpen(true)}
           >
-            {loading ? 'Deleting…' : 'Delete my account'}
+            Delete my account
           </Button>
         </div>
       </div>
+
+      <AlertDialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          if (!loading) setDeleteDialogOpen(open);
+        }}
+      >
+        <AlertDialogContent className="max-w-md border-border sm:rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-xl font-display font-bold text-foreground pr-8">
+              Delete your account?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-left text-sm text-muted-foreground">
+              This permanently removes your login and all data stored for this app (goals, friends,
+              notifications, feedback, judge requests, and more). This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {activeStakesCount > 0 && (
+            <div
+              role="alert"
+              className="rounded-xl border-2 border-destructive bg-destructive/15 px-4 py-3 text-left shadow-sm ring-2 ring-destructive/20"
+            >
+              <p className="text-sm font-bold uppercase tracking-wide text-destructive">
+                Active stakes
+              </p>
+              <p className="mt-1.5 text-sm font-semibold text-destructive">
+                You have {activeStakesCount} active goal{activeStakesCount === 1 ? '' : 's'} with money
+                at stake right now.
+              </p>
+              <p className="mt-2 text-xs font-medium leading-relaxed text-destructive/95">
+                Deleting your account removes this data from the app. If you are unsure about charges,
+                judges, or deadlines, resolve or finish those goals before you delete.
+              </p>
+            </div>
+          )}
+
+          <AlertDialogFooter className="gap-2 sm:gap-2">
+            <AlertDialogCancel disabled={loading} className="mt-0 sm:mt-0">
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={loading}
+              className="w-full sm:w-auto"
+              onClick={() => void confirmDeleteAccount()}
+            >
+              {loading ? 'Deleting…' : 'Yes, delete my account'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

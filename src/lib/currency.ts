@@ -175,11 +175,13 @@ export function normalizeStakeCurrency(value: unknown): StakeCurrency {
 export function formatStakeAmount(amount: number, currency: string): string {
   const safeAmount = Number.isFinite(amount) ? amount : 0;
   const normalized = normalizeStakeCurrency(currency);
+  const roundedCents = Math.round(safeAmount * 100);
+  const hasCents = roundedCents % 100 !== 0;
   return new Intl.NumberFormat(undefined, {
     style: 'currency',
     currency: normalized.toUpperCase(),
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: hasCents ? 2 : 0,
   }).format(safeAmount);
 }
 

@@ -1,11 +1,13 @@
 import type { JudgeRequest } from '@/lib/fetchers/tabData';
 import { formatStakeAmount, normalizeStakeCurrency } from '@/lib/currency';
+import { getCharityOptionById } from '@/lib/charities';
 
 export function judgeRequestPayloadLines(goal_payload: unknown): {
   title: string;
   /** Locale string for after the word "Deadline" */
   deadlineFormatted?: string;
   stakeFormatted?: string;
+  charitySummary?: string;
   visibility?: 'public' | 'private';
 } {
   const p = goal_payload as Record<string, unknown> | null;
@@ -16,8 +18,12 @@ export function judgeRequestPayloadLines(goal_payload: unknown): {
   const stake = Number(p.stake ?? 0);
   const stakeCurrency = normalizeStakeCurrency(p.stakeCurrency);
   const stakeFormatted = stake > 0 ? formatStakeAmount(stake, stakeCurrency) : undefined;
+  const rawCharity = p.charityId ?? p.charity_id;
+  const charityId = typeof rawCharity === 'string' ? rawCharity : undefined;
+  const charity = stake > 0 ? getCharityOptionById(charityId) : undefined;
+  const charitySummary = charity?.name;
   const visibility = (p.isPrivate ? 'private' : 'public') as 'public' | 'private';
-  return { title, deadlineFormatted, stakeFormatted, visibility };
+  return { title, deadlineFormatted, stakeFormatted, charitySummary, visibility };
 }
 
 export function judgeRequestDescriptionLine(r: JudgeRequest): string | undefined {

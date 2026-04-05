@@ -157,7 +157,9 @@ export function JudgeRequestToastHost() {
     >
       {judgeRequests.map((r) => {
         const requesterName = r.requesterProfile?.display_name || 'Friend';
-        const { title, deadlineFormatted, stakeFormatted, visibility } = judgeRequestPayloadLines(r.goal_payload);
+        const { title, deadlineFormatted, stakeFormatted, charitySummary, visibility } = judgeRequestPayloadLines(
+          r.goal_payload,
+        );
         const description = judgeRequestDescriptionLine(r);
         const timeLine = `Invited ${formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}`;
 
@@ -171,6 +173,7 @@ export function JudgeRequestToastHost() {
               visibility={visibility}
               deadlineFormatted={deadlineFormatted}
               stakeFormatted={stakeFormatted}
+              charitySummary={charitySummary}
               description={description}
               timeLine={timeLine}
               busy={busyId === r.id}

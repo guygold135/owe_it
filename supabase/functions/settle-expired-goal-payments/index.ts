@@ -1,6 +1,7 @@
 import Stripe from "npm:stripe@16.6.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createFailedStakePaymentIntent } from "../_shared/failed-stake-intent.ts";
 
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -31,6 +32,7 @@ async function settleFailedPayment(
     payment_method_id?: string | null;
     stripe_customer_id?: string | null;
     payment_retry_count?: number | null;
+    charity_id?: string | null;
   },
 ) {
   const stake = Number(goal.stake ?? 0);
@@ -73,20 +75,9 @@ async function settleFailedPayment(
     return "skipped";
   }
 
-  const currency = (goal.stake_currency ?? "usd").toLowerCase();
-  const amount = Math.round(stake * 100);
-  const deferredPi = await stripe.paymentIntents.create({
-    amount,
-    currency,
-    customer: customerId,
-    payment_method: paymentMethodId,
-    confirm: true,
-    off_session: true,
-    metadata: {
-      goal_id: goal.id,
-      settlement_reason: "failed_or_expired",
-    },
-  }, {
+  const deferredPi = await createFailedStakePaymentIntent(stripe, goal, {
+    customerId,
+    paymentMethodId,
     idempotencyKey: `goal-failed-${goal.id}`,
   });
 
@@ -194,7 +185,7 @@ serve(async (req: Request): Promise<Response> => {
 
     const { data: goals, error: queryError } = await supabase
       .from("goals")
-      .select("id,payment_intent_id,payment_method_id,stripe_customer_id,payment_status,stake,stake_currency,payment_retry_count,next_payment_retry_at")
+      .select("id,payment_intent_id,payment_method_id,stripe_customer_id,payment_status,stake,stake_currency,charity_id,payment_retry_count,next_payment_retry_at")
       .eq("status", "failed")
       .in("payment_status", ["authorized", "stored_for_later_capture", "payment_failed"])
       .or(`next_payment_retry_at.is.null,next_payment_retry_at.lte.${new Date().toISOString()}`)

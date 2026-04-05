@@ -24,6 +24,8 @@ export interface JudgeRequestInviteCardProps {
   deadlineFormatted?: string;
   /** Formatted amount, e.g. "$10.00" / "€10.00" */
   stakeFormatted?: string;
+  /** e.g. "Charity: Default pool" */
+  charitySummary?: string;
   /** Optional goal description */
   description?: string;
   /** e.g. "Invited 5 minutes ago" */
@@ -42,6 +44,7 @@ export function JudgeRequestInviteCard({
   visibility,
   deadlineFormatted,
   stakeFormatted,
+  charitySummary,
   description,
   timeLine,
   onAccept,
@@ -185,6 +188,12 @@ export function JudgeRequestInviteCard({
               <p className={cn('text-muted-foreground', textMeta)}>
                 <span className="font-bold text-foreground">Stake </span>
                 <span className="font-bold tabular-nums text-primary">{stakeFormatted}</span>
+              </p>
+            )}
+            {charitySummary && (
+              <p className={cn('text-muted-foreground', textMeta)}>
+                <span className="font-bold text-foreground">Beneficiary </span>
+                {charitySummary}
               </p>
             )}
             {timeLine && <p className={cn('text-muted-foreground', textTiny)}>{timeLine}</p>}

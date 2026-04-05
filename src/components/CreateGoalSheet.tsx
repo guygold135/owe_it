@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar } from 'lucide-react';
+import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar, Heart } from 'lucide-react';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { useGoals } from '@/hooks/useGoals';
 import { useAuth } from '@/hooks/useAuth';
@@ -10,8 +10,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { stripePromise } from '@/lib/stripe';
 import { toast } from 'sonner';
 import { formatStakeAmount, USD_TO_CURRENCY_RATE } from '@/lib/currency';
+import { stakeMajorToStripeUnits, isStripeZeroDecimalCurrency } from '@/lib/stripeCurrency';
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
+import { useMinimumStakeMajor } from '@/hooks/useMinimumStakeMajor';
 import { useShortDeadlineTesting } from '@/hooks/useShortDeadlineTesting';
+import { CHARITY_OPTIONS, DEFAULT_CHARITY_ID } from '@/lib/charities';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +31,6 @@ import { SuccessMorphIcon } from '@/components/ui/animated-state-icons';
 const steps = ['goal', 'stake', 'judge', 'card', 'confirm'] as const;
 
 const USD_BASE_PRESET_STAKES = [0, 10, 25, 50, 75, 100, 150, 200] as const;
-const STRIPE_MIN_DOLLARS = 1; // App minimum stake for paid goals
 /** Minimum time between "now" and deadline (must be strictly after this window). */
 const MIN_DEADLINE_LEAD_MS = 24 * 60 * 60 * 1000;
 
@@ -96,7 +98,15 @@ function getPowerOfTenPresetMultiplier(rate: number): number {
 function buildPresetStakesForCurrency(currency: string): number[] {
   const rate = USD_TO_CURRENCY_RATE[currency as keyof typeof USD_TO_CURRENCY_RATE] ?? 1;
   const multiplier = getPowerOfTenPresetMultiplier(rate);
-  return USD_BASE_PRESET_STAKES.map((usdAmount) => usdAmount * multiplier);
+  return USD_BASE_PRESET_STAKES.map((usdAmount) => {
+    const raw = usdAmount * multiplier;
+    return isStripeZeroDecimalCurrency(currency) ? Math.round(raw) : raw;
+  });
+}
+
+function roundStakeMajor(num: number, currency: string): number {
+  if (isStripeZeroDecimalCurrency(currency)) return Math.round(num);
+  return Math.round(num * 100) / 100;
 }
 
 function CardStepFields({ stake, stakeCurrency }: { stake: number; stakeCurrency: string }) {
@@ -165,6 +175,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const { addGoal, loadGoals, goals } = useGoals();
   const { user } = useAuth();
   const { currency: stakeCurrency } = useStakeCurrencyPreference();
+  const { minimumStake } = useMinimumStakeMajor(stakeCurrency);
   const { enabled: allowShortDeadlines } = useShortDeadlineTesting();
   const deadlineInputRef = useRef<HTMLInputElement | null>(null);
   const [step, setStep] = useState(0);
@@ -177,6 +188,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const [paymentMethodId, setPaymentMethodId] = useState<string | null>(null);
   const [customStakeError, setCustomStakeError] = useState(false);
   const [customStakeInput, setCustomStakeInput] = useState('');
+  const [selectedCharityId, setSelectedCharityId] = useState(DEFAULT_CHARITY_ID);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [judgeRequestId, setJudgeRequestId] = useState<string | null>(null);
   const [waitingJudgeName, setWaitingJudgeName] = useState<string | null>(null);
@@ -386,6 +398,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     setStep(0); setTitle(''); setDescription(''); setStake(0);
     setDeadline(''); setJudge(null); setIsPrivate(false);
     setPaymentMethodId(null); setCustomStakeInput(''); setCustomStakeError(false);
+    setSelectedCharityId(DEFAULT_CHARITY_ID);
     setJudgeRequestId(null); setWaitingJudgeName(null);
     setConfirmCloseKind(null);
     setSignOverlayPhase('idle');
@@ -473,7 +486,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       const raw = customStakeInput.trim();
       if (raw !== '') {
         const num = Number(raw);
-        if (!Number.isFinite(num) || num < 0 || (num > 0 && num < STRIPE_MIN_DOLLARS)) {
+        if (!Number.isFinite(num) || num < 0 || (num > 0 && num < minimumStake)) {
           setCustomStakeError(true);
           return;
         }
@@ -503,6 +516,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               stakeCurrency,
               deadline: deadlineDate.toISOString(),
               isPrivate,
+              charityId: selectedCharityId,
             };
             const { data, error } = await supabase.rpc('create_judge_request', {
               p_judge_user_id: judge.id,
@@ -550,7 +564,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       throw new Error(signDeadlineErr);
     }
 
-    const amountInCents = Math.round(stake * 100);
+    const amountStripeUnits = stakeMajorToStripeUnits(stake, stakeCurrency);
 
     if (stake === 0) {
       const newGoal: Goal = {
@@ -559,6 +573,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
         description,
         stake: 0,
         stakeCurrency,
+        charityId: null,
         deadline: new Date(deadline),
         createdAt: new Date(),
         resolvedAt: null,
@@ -585,8 +600,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
         judgeName: judge?.isSelf ? null : judge?.name,
         judgeUserId: judge?.isSelf ? user.id : judge?.id,
         isPrivate,
-        amount: amountInCents,
+        amount: amountStripeUnits,
         currency: stakeCurrency,
+        charityId: selectedCharityId,
       },
     });
 
@@ -704,7 +720,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', stiffness: 300, damping: 35 }}
-            className="fixed bottom-0 left-0 right-0 z-50 bg-[#0f0f0f] border-t border-border rounded-t-[32px] h-[640px] max-h-[90vh] overflow-y-visible overflow-x-hidden"
+            className="fixed bottom-0 left-0 right-0 z-50 bg-[#0f0f0f] border-t border-border rounded-t-[32px] h-[640px] max-h-[90vh] overflow-y-visible overflow-x-hidden [color-scheme:dark]"
             style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
           >
             <div className="p-6 h-full flex flex-col">
@@ -751,7 +767,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       type="text"
                       value={title}
                       onChange={e => setTitle(e.target.value)}
-                      placeholder="e.g., Finish Portfolio"
+                      placeholder="what is the goal?"
                       className="block w-full bg-muted rounded-2xl px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary font-display text-lg"
                     />
                     {duplicateActiveTitle && (
@@ -815,7 +831,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         min={minDeadlineInput}
                         onChange={e => setDeadline(e.target.value)}
                         aria-invalid={deadlineIssue ? true : undefined}
-                        className="absolute inset-0 z-10 w-full max-w-full cursor-pointer bg-transparent text-transparent caret-transparent opacity-[0.01] appearance-none"
+                        className="absolute inset-0 z-10 w-full max-w-full cursor-pointer bg-transparent text-transparent caret-transparent opacity-[0.01] appearance-none [color-scheme:dark]"
                       />
                     </div>
                     {deadlineIssue && (
@@ -877,6 +893,44 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     ))}
                   </div>
                   <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
+                      <Heart className="h-3.5 w-3.5" aria-hidden />
+                      <span>If you fail, stake goes to</span>
+                    </div>
+                    {stake > 0 ? (
+                      <div className="flex flex-col gap-2">
+                        {CHARITY_OPTIONS.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setSelectedCharityId(c.id)}
+                            className={`w-full rounded-2xl border px-4 py-3 text-left transition-colors ${
+                              selectedCharityId === c.id
+                                ? 'border-primary bg-primary/10 ring-1 ring-primary/30'
+                                : 'border-border bg-muted/50 hover:bg-muted/80'
+                            }`}
+                          >
+                            <p className="font-display font-semibold text-sm text-foreground">{c.name}</p>
+                            {c.subtitle ? (
+                              <p className="mt-1 text-xs text-muted-foreground leading-snug">{c.subtitle}</p>
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground rounded-2xl border border-border bg-muted/30 px-4 py-3">
+                        Pick a paid stake above to choose a charity. Free goals are not charged.
+                      </p>
+                    )}
+                    {stake > 0 ? (
+                      <p className="text-[11px] text-muted-foreground/90 leading-snug px-0.5">
+                        Automatic transfer to the charity uses Stripe Connect. Until each charity has an{' '}
+                        <code className="text-foreground/80">acct_…</code> id in the server config, charges still work but
+                        funds stay on your platform account for manual payout.
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
                     <label className="text-xs uppercase tracking-widest text-muted-foreground block">
                       Or custom amount
                     </label>
@@ -903,8 +957,8 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                           setCustomStakeError(false);
                           const num = Number(v);
                           if (num >= 0) {
-                            if (num === 0 || num >= STRIPE_MIN_DOLLARS) {
-                              setStake(Math.round(num * 100) / 100);
+                            if (num === 0 || num >= minimumStake) {
+                              setStake(roundStakeMajor(num, stakeCurrency));
                             }
                           }
                         }}
@@ -918,15 +972,15 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                             setStake(0);
                             return;
                           }
-                          if (num > 0 && num < STRIPE_MIN_DOLLARS) {
+                          if (num > 0 && num < minimumStake) {
                             toast.error(
-                              `Minimum charge is ${formatStakeAmount(STRIPE_MIN_DOLLARS, stakeCurrency)} (Stripe requirement).`,
+                              `Minimum stake is ${formatStakeAmount(minimumStake, stakeCurrency)} (at least US$1 at the current rate).`,
                             );
                             setCustomStakeInput('');
                             setStake(0);
                             return;
                           }
-                          const rounded = Math.round(num * 100) / 100;
+                          const rounded = roundStakeMajor(num, stakeCurrency);
                           setStake(rounded);
                           setCustomStakeInput(
                             rounded === Math.floor(rounded) ? rounded.toString() : rounded.toFixed(2)
@@ -937,9 +991,24 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         }`}
                       />
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Minimum {formatStakeAmount(STRIPE_MIN_DOLLARS, stakeCurrency)} for a stake.
-                    </p>
+                    <div className="space-y-1.5 text-xs text-muted-foreground">
+                      <p>
+                        Minimum paid stake: {formatStakeAmount(minimumStake, stakeCurrency)} (never below US$1; rate
+                        updates over time).
+                      </p>
+                      <p>
+                        If the stake is charged: Stripe keeps its processing fee (often around{' '}
+                        <span className="text-foreground/90">2.9% + US$0.30</span> on US cards — varies by card and
+                        country). The app retains <span className="text-foreground/90">3.8% + US$0.20</span> as a platform
+                        fee. The rest is transferred to the charity you selected when Stripe Connect is configured for
+                        that charity. Non-USD stakes settle in {stakeCurrency.toUpperCase()}; US dollar figures are
+                        approximate.
+                      </p>
+                      <p>
+                        If your card is billed in another currency, your bank may charge a separate conversion fee we do
+                        not control.
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}

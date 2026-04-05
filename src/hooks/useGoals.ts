@@ -63,6 +63,7 @@ export function useGoals() {
       description: goal.description,
       stake: goal.stake,
       stake_currency: goal.stakeCurrency,
+      charity_id: goal.charityId ?? null,
       deadline: goal.deadline.toISOString(),
       status: goal.status,
       judge_name: goal.judge?.isSelf ? null : goal.judge?.name,
@@ -73,7 +74,21 @@ export function useGoals() {
     let error = insertWithCurrency.error;
     if (error) {
       const message = String((error as { message?: unknown })?.message ?? '').toLowerCase();
-      if (message.includes('stake_currency')) {
+      if (message.includes('charity_id')) {
+        const retry = await supabase.from('goals').insert({
+          user_id: user.id,
+          title: goal.title,
+          description: goal.description,
+          stake: goal.stake,
+          stake_currency: goal.stakeCurrency,
+          deadline: goal.deadline.toISOString(),
+          status: goal.status,
+          judge_name: goal.judge?.isSelf ? null : goal.judge?.name,
+          judge_user_id: goal.judge?.isSelf ? user.id : goal.judge?.id,
+          is_private: goal.isPrivate,
+        });
+        error = retry.error;
+      } else if (message.includes('stake_currency')) {
         const retry = await supabase.from('goals').insert({
           user_id: user.id,
           title: goal.title,

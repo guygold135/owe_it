@@ -20,8 +20,9 @@ const gitShaShort = gitShaRaw ? gitShaRaw.slice(0, 7) : "";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
-  // Important for Capacitor/WebView: use relative asset paths from local files.
-  base: "./",
+  // Capacitor/WebView needs relative asset paths. Vercel (and other static hosts with
+  // SPA fallback) need "/" so deep links and refreshes resolve /assets/* from the site root.
+  base: process.env.VERCEL ? "/" : "./",
   server: {
     host: "0.0.0.0",
     port: 8080,

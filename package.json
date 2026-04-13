@@ -10,6 +10,8 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
+    "icons": "node scripts/rasterize-favicons.mjs",
+    "icons:build": "python scripts/build_app_logo.py && node scripts/rasterize-favicons.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -92,6 +94,7 @@
     "jsdom": "^20.0.3",
     "lovable-tagger": "^1.1.13",
     "patch-package": "^8.0.1",
+    "sharp": "^0.34.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",

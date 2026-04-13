@@ -7,6 +7,7 @@ root = Path(__file__).resolve().parents[1]
 src = root / "public" / "favicon-full.svg"
 out = root / "public" / "app-logo.svg"
 mirror = root / "public" / "owe-it-logo.svg"
+favicon_svg = root / "public" / "favicon.svg"
 
 s = src.read_text(encoding="utf-8")
 m = re.search(r'(</defs>)(.*?)(<g clip-path="url\(#75c9a9569e\)">)', s, re.DOTALL)
@@ -22,5 +23,7 @@ clean = re.sub(
 )
 out.write_text(clean, encoding="utf-8", newline="")
 shutil.copyfile(out, mirror)
+shutil.copyfile(out, favicon_svg)
 print(f"Wrote {out.relative_to(root)} ({len(clean)} bytes)")
 print(f"Mirrored to {mirror.relative_to(root)}")
+print(f"Mirrored to {favicon_svg.relative_to(root)} (browser tab icon)")

@@ -40,7 +40,7 @@ const queryClient = new QueryClient({
 });
 
 /** Cache-bust when the SVG asset changes; cropped viewBox so the mark + wordmark fill the frame. */
-const APP_LOGO_SRC = '/app-logo.svg?v=7';
+const APP_LOGO_SRC = '/app-logo.svg?v=8';
 
 function BootstrapLogoScreen() {
   return (

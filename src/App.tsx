@@ -39,6 +39,23 @@ const queryClient = new QueryClient({
   },
 });
 
+/** Cache-bust when the SVG asset changes; cropped viewBox so the mark + wordmark fill the frame. */
+const APP_LOGO_SRC = '/app-logo.svg?v=7';
+
+function BootstrapLogoScreen() {
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center">
+      <img
+        src={APP_LOGO_SRC}
+        alt="Owe It"
+        className="block h-[18.2rem] w-[18.2rem] sm:h-[20.8rem] sm:w-[20.8rem] object-contain animate-pop-in"
+        decoding="async"
+        fetchPriority="high"
+      />
+    </div>
+  );
+}
+
 function AppRoutes() {
   const { user, loading, passwordRecoveryPending } = useAuth();
   const [createOpen, setCreateOpen] = useState(false);
@@ -69,23 +86,12 @@ function AppRoutes() {
   }, [showSessionSplash, splashMinElapsed, appReadyForRouting, splashMaxElapsed]);
 
   if (shouldShowLogoSplash) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <img
-          src="/app-logo.svg"
-          alt="Owe It"
-          className="block h-[18.2rem] w-[18.2rem] sm:h-[20.8rem] sm:w-[20.8rem] object-contain animate-pop-in"
-        />
-      </div>
-    );
+    return <BootstrapLogoScreen />;
   }
 
+  // Session splash is one-time per tab; still show the branded logo (not a spinner) while auth resolves.
   if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-      </div>
-    );
+    return <BootstrapLogoScreen />;
   }
 
   if (passwordRecoveryPending && !user) {
@@ -153,15 +159,7 @@ function LoggedInAppShell({
   }, [showShellSplash, shellSplashMinElapsed, shellSplashMaxElapsed, isFetching]);
 
   if (shouldShowShellSplash) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <img
-          src="/app-logo.svg"
-          alt="Owe It"
-          className="block h-[18.2rem] w-[18.2rem] sm:h-[20.8rem] sm:w-[20.8rem] object-contain animate-pop-in"
-        />
-      </div>
-    );
+    return <BootstrapLogoScreen />;
   }
 
   return (

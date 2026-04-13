@@ -126,7 +126,7 @@ export default function Auth() {
         className="text-center mb-12"
       >
         <div className="w-28 h-28 mx-auto mb-6 flex items-center justify-center">
-          <img src="/app-logo.svg" alt="" className="h-full w-full object-contain drop-shadow-sm" width={112} height={112} decoding="async" />
+          <img src="/app-logo.svg?v=7" alt="" className="h-full w-full object-contain drop-shadow-sm" width={112} height={112} decoding="async" />
         </div>
         <h1 className="text-4xl font-display font-extrabold text-foreground tracking-tight">
           Owe It

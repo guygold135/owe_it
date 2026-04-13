@@ -42,7 +42,7 @@ export function PasswordRecoveryScreen() {
         className="text-center mb-12"
       >
         <div className="w-24 h-24 mx-auto mb-6 flex items-center justify-center">
-          <img src="/app-logo.svg" alt="" className="h-full w-full object-contain drop-shadow-sm" width={96} height={96} decoding="async" />
+          <img src="/app-logo.svg?v=7" alt="" className="h-full w-full object-contain drop-shadow-sm" width={96} height={96} decoding="async" />
         </div>
         <h1 className="text-2xl font-display font-extrabold text-foreground tracking-tight">
           Set a new password

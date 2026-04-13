@@ -1,13 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" aria-hidden="true">
-  <!-- Built for ~16px: big shapes only. Your full artwork stays in app-logo.svg / favicon-full.svg. -->
-  <rect width="32" height="32" rx="7" fill="#1d212b"/>
+  <!-- Transparent background: reads cleanly on light and dark browser chrome. -->
   <!-- Arms (behind hands) -->
   <rect x="5" y="15" width="22" height="4" rx="2" fill="#30e87d"/>
   <!-- Torso -->
   <rect x="13" y="14" width="6" height="11" rx="2.5" fill="#30e87d"/>
   <!-- Head -->
   <circle cx="16" cy="9.5" r="4.5" fill="#30e87d"/>
-  <!-- Money + dream drawn last so they stay readable on the sides -->
+  <!-- Money + dream -->
   <circle cx="8.5" cy="16" r="6" fill="#30e87d"/>
   <circle cx="24" cy="16" r="6" fill="#30e87d"/>
   <circle cx="27.5" cy="10.5" r="3.5" fill="#30e87d"/>

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { Target, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { consumeAuthRedirectError } from '@/lib/sessionBootstrap';
 
@@ -125,8 +125,8 @@ export default function Auth() {
         animate={{ opacity: 1, y: 0 }}
         className="text-center mb-12"
       >
-        <div className="w-16 h-16 mx-auto rounded-3xl bg-primary/10 flex items-center justify-center mb-6 glow-primary">
-          <Target className="w-8 h-8 text-primary" />
+        <div className="w-28 h-28 mx-auto mb-6 flex items-center justify-center">
+          <img src="/app-logo.svg" alt="" className="h-full w-full object-contain drop-shadow-sm" width={112} height={112} decoding="async" />
         </div>
         <h1 className="text-4xl font-display font-extrabold text-foreground tracking-tight">
           Owe It

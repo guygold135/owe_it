@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { Target, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 
 export function PasswordRecoveryScreen() {
@@ -41,8 +41,8 @@ export function PasswordRecoveryScreen() {
         animate={{ opacity: 1, y: 0 }}
         className="text-center mb-12"
       >
-        <div className="w-16 h-16 mx-auto rounded-3xl bg-primary/10 flex items-center justify-center mb-6 glow-primary">
-          <Target className="w-8 h-8 text-primary" />
+        <div className="w-24 h-24 mx-auto mb-6 flex items-center justify-center">
+          <img src="/app-logo.svg" alt="" className="h-full w-full object-contain drop-shadow-sm" width={96} height={96} decoding="async" />
         </div>
         <h1 className="text-2xl font-display font-extrabold text-foreground tracking-tight">
           Set a new password

@@ -72,7 +72,7 @@ function AppRoutes() {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <img
-          src="/favicon-full.svg"
+          src="/app-logo.svg"
           alt="Owe It"
           className="block h-[18.2rem] w-[18.2rem] sm:h-[20.8rem] sm:w-[20.8rem] object-contain animate-pop-in"
         />
@@ -156,7 +156,7 @@ function LoggedInAppShell({
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <img
-          src="/favicon-full.svg"
+          src="/app-logo.svg"
           alt="Owe It"
           className="block h-[18.2rem] w-[18.2rem] sm:h-[20.8rem] sm:w-[20.8rem] object-contain animate-pop-in"
         />

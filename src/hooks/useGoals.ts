@@ -52,18 +52,18 @@ export function useGoals() {
 
   const goals = query.data ?? [];
 
-  const addGoal = async (goal: Goal) => {
+  const addGoal = async (goal: Goal): Promise<string | null> => {
     if (!user) {
       throw new Error('No user is signed in.');
     }
 
-    const insertWithCurrency = await supabase.from('goals').insert({
+    const buildPayload = (opts?: { includeCurrency?: boolean; includeCharity?: boolean }) => ({
       user_id: user.id,
       title: goal.title,
       description: goal.description,
       stake: goal.stake,
-      stake_currency: goal.stakeCurrency,
-      charity_id: goal.charityId ?? null,
+      ...(opts?.includeCurrency === false ? {} : { stake_currency: goal.stakeCurrency }),
+      ...(opts?.includeCharity === false ? {} : { charity_id: goal.charityId ?? null }),
       deadline: goal.deadline.toISOString(),
       status: goal.status,
       judge_name: goal.judge?.isSelf ? null : goal.judge?.name,
@@ -71,36 +71,32 @@ export function useGoals() {
       is_private: goal.isPrivate,
     });
 
+    const insertWithCurrency = await supabase
+      .from('goals')
+      .insert(buildPayload({ includeCurrency: true, includeCharity: true }))
+      .select('id')
+      .maybeSingle();
+
     let error = insertWithCurrency.error;
+    let createdGoalId = (insertWithCurrency.data as { id?: string } | null)?.id ?? null;
     if (error) {
       const message = String((error as { message?: unknown })?.message ?? '').toLowerCase();
       if (message.includes('charity_id')) {
-        const retry = await supabase.from('goals').insert({
-          user_id: user.id,
-          title: goal.title,
-          description: goal.description,
-          stake: goal.stake,
-          stake_currency: goal.stakeCurrency,
-          deadline: goal.deadline.toISOString(),
-          status: goal.status,
-          judge_name: goal.judge?.isSelf ? null : goal.judge?.name,
-          judge_user_id: goal.judge?.isSelf ? user.id : goal.judge?.id,
-          is_private: goal.isPrivate,
-        });
+        const retry = await supabase
+          .from('goals')
+          .insert(buildPayload({ includeCurrency: true, includeCharity: false }))
+          .select('id')
+          .maybeSingle();
         error = retry.error;
+        createdGoalId = (retry.data as { id?: string } | null)?.id ?? createdGoalId;
       } else if (message.includes('stake_currency')) {
-        const retry = await supabase.from('goals').insert({
-          user_id: user.id,
-          title: goal.title,
-          description: goal.description,
-          stake: goal.stake,
-          deadline: goal.deadline.toISOString(),
-          status: goal.status,
-          judge_name: goal.judge?.isSelf ? null : goal.judge?.name,
-          judge_user_id: goal.judge?.isSelf ? user.id : goal.judge?.id,
-          is_private: goal.isPrivate,
-        });
+        const retry = await supabase
+          .from('goals')
+          .insert(buildPayload({ includeCurrency: false, includeCharity: true }))
+          .select('id')
+          .maybeSingle();
         error = retry.error;
+        createdGoalId = (retry.data as { id?: string } | null)?.id ?? createdGoalId;
       }
     }
 
@@ -126,6 +122,7 @@ export function useGoals() {
 
     toast.success('Goal created.');
     await queryClient.invalidateQueries({ queryKey: queryKeys.goals(user.id) });
+    return createdGoalId;
   };
 
   const updateGoal = async (id: string, updates: Partial<Goal>) => {
@@ -196,10 +193,21 @@ export function useGoals() {
     await queryClient.invalidateQueries({ queryKey: queryKeys.goals(user.id) });
   };
 
+  const deleteGoal = async (id: string) => {
+    if (!user) throw new Error('No user is signed in.');
+    const { error } = await supabase.from('goals').delete().eq('id', id).eq('user_id', user.id);
+    if (error) {
+      console.error('Error deleting goal', error);
+      throw error;
+    }
+    await queryClient.invalidateQueries({ queryKey: queryKeys.goals(user.id) });
+  };
+
   return {
     goals,
     loading: query.isPending,
     addGoal,
+    deleteGoal,
     updateGoal,
     loadGoals,
   };

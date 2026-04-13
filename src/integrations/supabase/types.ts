@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       profiles: {
         Row: {
+          app_tutorial_done_at: string | null
           avatar_url: string | null
           created_at: string
           display_name: string
@@ -24,6 +25,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          app_tutorial_done_at?: string | null
           avatar_url?: string | null
           created_at?: string
           display_name?: string
@@ -32,6 +34,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          app_tutorial_done_at?: string | null
           avatar_url?: string | null
           created_at?: string
           display_name?: string

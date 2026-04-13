@@ -13,7 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 import { SUPPORTED_STAKE_CURRENCIES, formatStakeCurrencyLabel, type StakeCurrency } from '@/lib/currency';
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
@@ -25,6 +25,7 @@ export default function Settings() {
   const navigate = useNavigate();
   const { goals } = useGoals();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const { currency, setCurrency } = useStakeCurrencyPreference();
   const { enabled: allowShortDeadlines, setEnabled: setAllowShortDeadlines } = useShortDeadlineTesting();
@@ -186,6 +187,27 @@ export default function Settings() {
 
         <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
           <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
+              <LogOut className="w-4 h-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-foreground">Sign out</p>
+              <p className="text-xs text-muted-foreground">
+                Sign out of this device and return to the login screen.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            className="w-full bg-transparent"
+            onClick={() => setSignOutDialogOpen(true)}
+          >
+            Sign out
+          </Button>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
+          <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-destructive/10 flex items-center justify-center">
               <AlertTriangle className="w-4 h-4 text-destructive" />
             </div>
@@ -207,6 +229,41 @@ export default function Settings() {
           </Button>
         </div>
       </div>
+
+      <AlertDialog
+        open={signOutDialogOpen}
+        onOpenChange={(open) => {
+          if (!loading) setSignOutDialogOpen(open);
+        }}
+      >
+        <AlertDialogContent className="max-w-md border-border sm:rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-xl font-display font-bold text-foreground pr-8">
+              Sign out now?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-left text-sm text-muted-foreground">
+              You&apos;ll be signed out of this device and returned to the login screen.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-2">
+            <AlertDialogCancel disabled={loading} className="mt-0 sm:mt-0">
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={loading}
+              className="w-full sm:w-auto"
+              onClick={async () => {
+                setSignOutDialogOpen(false);
+                await signOut();
+              }}
+            >
+              Yes, sign out
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={deleteDialogOpen}

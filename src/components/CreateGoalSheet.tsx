@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { TutorialCard } from '@/components/TutorialCard';
+import { useAppTutorial } from '@/hooks/useAppTutorial';
+import { APP_TUTORIAL_SHEET_STEP_TO_PHASE, isAppTutorialSheetPhase } from '@/lib/appTutorial';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar, Heart } from 'lucide-react';
+import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar, Heart, UserPlus } from 'lucide-react';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { useGoals } from '@/hooks/useGoals';
 import { useAuth } from '@/hooks/useAuth';
@@ -27,6 +30,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { PublishButton, type PublishPhase } from '@/components/ui/publish-button';
 import { SuccessMorphIcon } from '@/components/ui/animated-state-icons';
+import type { ProfileLite } from '@/lib/fetchers/tabData';
 
 const steps = ['goal', 'stake', 'judge', 'card', 'confirm'] as const;
 
@@ -54,7 +58,29 @@ function getDeadlineValidationError(
   return null;
 }
 
-type CloseConfirmKind = 'judge-wait' | 'card' | 'sign';
+/** Large dot prefix for each requirement line (textarea). */
+const REQUIREMENT_BULLET = '●';
+
+function normalizeRequirementLines(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => {
+      const trimmedStart = line.trimStart();
+      if (trimmedStart === '') return '';
+      if (/^[•·●\-*]\s?/.test(trimmedStart)) return line.trimEnd();
+      const lead = line.match(/^\s*/)?.[0] ?? '';
+      return `${lead}${REQUIREMENT_BULLET} ${trimmedStart.trimEnd()}`;
+    })
+    .join('\n')
+    .replace(/\n+$/, '');
+}
+
+function isRequirementsContentEmpty(text: string): boolean {
+  if (!text.trim()) return true;
+  return text.split('\n').every((line) => line.replace(/^[•·●\-*]\s*/, '').trim() === '');
+}
+
+type CloseConfirmKind = 'judge-wait' | 'card' | 'sign' | 'tutorial-exit';
 
 const CARD_ELEMENT_OPTIONS = {
   style: {
@@ -113,8 +139,10 @@ function CardStepFields({ stake, stakeCurrency }: { stake: number; stakeCurrency
   return (
     <div className="space-y-6 flex-1">
       <p className="text-sm text-muted-foreground">
-        Your card will be charged {formatStakeAmount(stake, stakeCurrency)} if you don’t complete your goal by the
-        deadline.
+        <span className="font-semibold text-foreground">
+          Only your card will be charged {formatStakeAmount(stake, stakeCurrency)},
+        </span>{' '}
+        if you don&apos;t complete your goal by the deadline.
       </p>
 
       <div className="p-4 bg-muted rounded-2xl">
@@ -164,6 +192,7 @@ function CardStepContinueButton({ onPaymentMethodReady }: { onPaymentMethodReady
     <button
       type="button"
       onClick={handleContinue}
+      disabled={!stripe || !elements}
       className="flex-1 py-4 rounded-2xl bg-primary text-primary-foreground font-display font-bold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
     >
       Continue <ChevronRight className="w-4 h-4" />
@@ -172,12 +201,27 @@ function CardStepContinueButton({ onPaymentMethodReady }: { onPaymentMethodReady
 }
 
 export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const {
+    tutorialActive,
+    sheetCloseLocked,
+    phase: tutorialPhase,
+    onCreateSheetStep,
+    registerStakeChoice,
+    exitTutorial,
+    goBackToFabFromSheet,
+    progressCurrent,
+    progressTotal,
+    onGoalCreatedInTutorial,
+  } = useAppTutorial();
+  const tutorialSheetStepRef = useRef<number | null>(null);
   const { addGoal, loadGoals, goals } = useGoals();
   const { user } = useAuth();
   const { currency: stakeCurrency } = useStakeCurrencyPreference();
   const { minimumStake } = useMinimumStakeMajor(stakeCurrency);
   const { enabled: allowShortDeadlines } = useShortDeadlineTesting();
   const deadlineInputRef = useRef<HTMLInputElement | null>(null);
+  const goalTitleInputRef = useRef<HTMLInputElement | null>(null);
+  const requirementsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [step, setStep] = useState(0);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -190,6 +234,11 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const [customStakeInput, setCustomStakeInput] = useState('');
   const [selectedCharityId, setSelectedCharityId] = useState(DEFAULT_CHARITY_ID);
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [judgeByIdInput, setJudgeByIdInput] = useState('');
+  const [judgeByIdSearching, setJudgeByIdSearching] = useState(false);
+  const [judgeByIdError, setJudgeByIdError] = useState<string | null>(null);
+  const [judgeByIdResult, setJudgeByIdResult] = useState<ProfileLite | null>(null);
+  const [judgeByIdSending, setJudgeByIdSending] = useState(false);
   const [judgeRequestId, setJudgeRequestId] = useState<string | null>(null);
   const [waitingJudgeName, setWaitingJudgeName] = useState<string | null>(null);
   const [confirmCloseKind, setConfirmCloseKind] = useState<CloseConfirmKind | null>(null);
@@ -197,6 +246,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const [signOverlayPhase, setSignOverlayPhase] = useState<'idle' | 'loading' | 'success'>('idle');
   const judgeRequestIdRef = useRef<string | null>(null);
   const stakeRef = useRef(stake);
+  const createdGoalIdRef = useRef<string | null>(null);
   /** judge-wait dialog: full sheet close (X/backdrop) vs return to judge picker (Back button) */
   const judgeWaitDismissRef = useRef<'sheet' | 'back-to-picker'>('sheet');
 
@@ -209,8 +259,29 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   }, [stake]);
 
   useEffect(() => {
+    if (!open) {
+      tutorialSheetStepRef.current = null;
+      return;
+    }
+    if (!tutorialActive) return;
+    if (tutorialSheetStepRef.current === step) return;
+    tutorialSheetStepRef.current = step;
+    onCreateSheetStep(step);
+  }, [open, step, tutorialActive, onCreateSheetStep]);
+
+  useEffect(() => {
     if (step !== 4) setSignOverlayPhase('idle');
   }, [step]);
+
+  useEffect(() => {
+    if (!open || step !== 0) return;
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        goalTitleInputRef.current?.focus();
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [open, step]);
 
   const deadlineDate = useMemo(() => {
     if (!deadline) return null;
@@ -243,51 +314,127 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     [stakeCurrency],
   );
 
-  useEffect(() => {
-    const loadFriends = async () => {
-      if (!user?.id) return;
-      const { data: edges, error: edgesError } = await supabase
-        .from('friendships')
-        .select('friend_user_id')
-        .eq('user_id', user.id);
+  const loadFriends = useCallback(async () => {
+    if (!user?.id) return;
+    const { data: edges, error: edgesError } = await supabase
+      .from('friendships')
+      .select('friend_user_id')
+      .eq('user_id', user.id);
 
-      if (edgesError) {
-        console.error('Error loading friendships', edgesError);
-        setFriends([]);
-        return;
-      }
+    if (edgesError) {
+      console.error('Error loading friendships', edgesError);
+      setFriends([]);
+      return;
+    }
 
-      const friendIds = (edges ?? []).map((e: any) => e.friend_user_id).filter(Boolean);
-      if (friendIds.length === 0) {
-        setFriends([]);
-        return;
-      }
+    const friendIds = (edges ?? []).map((e: any) => e.friend_user_id).filter(Boolean);
+    if (friendIds.length === 0) {
+      setFriends([]);
+      return;
+    }
 
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('id, display_name, avatar_url')
-        .in('id', friendIds);
+    const { data: profiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, display_name, avatar_url')
+      .in('id', friendIds);
 
-      if (profilesError) {
-        console.error('Error loading friend profiles', profilesError);
-        setFriends([]);
-        return;
-      }
+    if (profilesError) {
+      console.error('Error loading friend profiles', profilesError);
+      setFriends([]);
+      return;
+    }
 
-      const mapped = (profiles ?? []).map((p: any) => ({
-        id: p.id,
-        name: p.display_name ?? 'Friend',
-        avatar: p.avatar_url ?? '',
-        activeGoals: 0,
-        completedGoals: 0,
-        totalStaked: 0,
-      }));
-      mapped.sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
-      setFriends(mapped);
-    };
-
-    loadFriends();
+    const mapped = (profiles ?? []).map((p: any) => ({
+      id: p.id,
+      name: p.display_name ?? 'Friend',
+      avatar: p.avatar_url ?? '',
+      activeGoals: 0,
+      completedGoals: 0,
+      totalStaked: 0,
+    }));
+    mapped.sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+    setFriends(mapped);
   }, [user?.id]);
+
+  useEffect(() => {
+    void loadFriends();
+  }, [loadFriends]);
+
+  const normalizedJudgeByIdCode = useMemo(
+    () => judgeByIdInput.replace(/\D/g, '').slice(0, 11),
+    [judgeByIdInput],
+  );
+
+  const searchJudgeByFriendId = useCallback(async () => {
+    setJudgeByIdError(null);
+    setJudgeByIdResult(null);
+    if (!user?.id) return;
+    if (normalizedJudgeByIdCode.length !== 11) {
+      setJudgeByIdError('Enter an 11-digit Friend ID.');
+      return;
+    }
+    setJudgeByIdSearching(true);
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, display_name, avatar_url, friend_code')
+      .eq('friend_code', normalizedJudgeByIdCode)
+      .maybeSingle();
+    setJudgeByIdSearching(false);
+
+    if (error) {
+      console.error('Friend search error', error);
+      const msg = String((error as any)?.message ?? '').toLowerCase();
+      if (msg.includes('friend_code') && (msg.includes('column') || msg.includes('schema') || msg.includes('does not exist'))) {
+        setJudgeByIdError('Friend ID is not available yet.');
+      } else {
+        setJudgeByIdError('Could not look up this ID.');
+      }
+      return;
+    }
+    if (!data) {
+      setJudgeByIdError('No user found with that Friend ID.');
+      return;
+    }
+    const row = data as any;
+    if (row.id === user.id) {
+      setJudgeByIdError('That’s your Friend ID. Pick someone else.');
+      return;
+    }
+    setJudgeByIdResult({
+      id: row.id,
+      display_name: row.display_name ?? '',
+      avatar_url: row.avatar_url ?? null,
+      friend_code: row.friend_code ?? null,
+    });
+  }, [normalizedJudgeByIdCode, user?.id]);
+
+  const sendJudgeByIdFriendRequest = useCallback(async () => {
+    if (normalizedJudgeByIdCode.length !== 11) return;
+    setJudgeByIdSending(true);
+    setJudgeByIdError(null);
+    const { error } = await supabase.rpc('send_friend_request_by_code', { p_to_friend_code: normalizedJudgeByIdCode });
+    setJudgeByIdSending(false);
+    if (error) {
+      setJudgeByIdError(error.message || 'Could not send request.');
+      return;
+    }
+    setJudgeByIdResult(null);
+    setJudgeByIdInput('');
+    toast.success('Friend request sent. Once they accept, they’ll appear in your list.');
+    void loadFriends();
+  }, [normalizedJudgeByIdCode, loadFriends]);
+
+  const selectJudgeFromLookup = useCallback((profile: ProfileLite) => {
+    setJudge({
+      id: profile.id,
+      name: profile.display_name || 'Friend',
+      avatar: profile.avatar_url || '',
+      isSelf: false,
+    });
+    setJudgeByIdResult(null);
+    setJudgeByIdInput('');
+    setJudgeByIdError(null);
+  }, []);
 
   useEffect(() => {
     if (!judgeRequestId) return;
@@ -402,6 +549,11 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     setJudgeRequestId(null); setWaitingJudgeName(null);
     setConfirmCloseKind(null);
     setSignOverlayPhase('idle');
+    setJudgeByIdInput('');
+    setJudgeByIdError(null);
+    setJudgeByIdResult(null);
+    setJudgeByIdSearching(false);
+    setJudgeByIdSending(false);
   };
 
   /** Closing the sheet = abandoning goal creation → cancel pending judge request for the judge */
@@ -422,6 +574,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
   /** Close / backdrop: confirm first on judge wait, card step, or sign step */
   const requestClose = () => {
+    if (sheetCloseLocked) return;
     if (confirmCloseKind !== null) return;
     if (judgeRequestId) {
       judgeWaitDismissRef.current = 'sheet';
@@ -440,6 +593,14 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   };
 
   const confirmCloseDialog = () => {
+    if (confirmCloseKind === 'tutorial-exit') {
+      flushSync(() => setConfirmCloseKind(null));
+      void (async () => {
+        await exitTutorial();
+        onClose();
+      })();
+      return;
+    }
     if (confirmCloseKind === 'judge-wait' && judgeWaitDismissRef.current === 'back-to-picker') {
       flushSync(() => setConfirmCloseKind(null));
       const id = judgeRequestIdRef.current;
@@ -492,6 +653,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
         }
         setCustomStakeError(false);
       }
+      registerStakeChoice(stake > 0);
       // After stake, always choose judge next
       setStep(2);
       return;
@@ -538,7 +700,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
         return;
       }
 
-      setStep(stake > 0 ? 3 : 4);
+      setStep(tutorialActive && isAppTutorialSheetPhase(tutorialPhase) ? 3 : stake > 0 ? 3 : 4);
       return;
     }
     setStep((s) => s + 1);
@@ -546,7 +708,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
   const goBack = () => {
     if (step === 4) {
-      setStep(stake > 0 ? 3 : 2);
+      setStep(tutorialActive && isAppTutorialSheetPhase(tutorialPhase) ? 3 : stake > 0 ? 3 : 2);
       return;
     }
     // From card go back to judge
@@ -557,7 +719,88 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     setStep((s) => s - 1);
   };
 
+  const handleTutorialSheetGoBack = () => {
+    if (step > 0) {
+      goBack();
+      return;
+    }
+    goBackToFabFromSheet();
+    onClose();
+  };
+
+  const tutorialSheetOverlayBody = useMemo(() => {
+    const p = APP_TUTORIAL_SHEET_STEP_TO_PHASE[step];
+    switch (p) {
+      case 'sheet_goal':
+        return (
+          <p className="text-pretty">
+            On this page you define your goal&apos;s name, requirements, deadline - everything that defines what
+            &quot;done&quot; means, and visibility.
+          </p>
+        );
+      case 'sheet_stake':
+        return (
+          <>
+            <p className="text-pretty font-display font-semibold text-foreground">Here&apos;s where the magic happens.</p>
+            <p className="text-pretty">
+              Choose what you&apos;re willing to put on the line. If you won&apos;t complete the goal in time your stake
+              will be charged and transferred to your selected charity. If you complete it in time, nothing will be
+              charged.
+            </p>
+            <p className="text-pretty">For the tutorial will choose the free option.</p>
+          </>
+        );
+      case 'sheet_judge':
+        return (
+          <>
+            <p className="text-pretty">
+              Here you choose your judge—a trusted friend who decides whether you completed the goal. That decision
+              determines whether your stake is charged. A judge can only be someone you&apos;re friends with on Owe It.
+            </p>
+            <p className="text-pretty">
+              For now choose yourself. For future goals, it&apos;s extremely recommended to choose an honest friend.
+            </p>
+          </>
+        );
+      case 'sheet_card':
+        return (
+          <p className="text-pretty">
+            This is where you will enter your card details and make the stake real, for this example there is no stake so
+            you can continue.
+          </p>
+        );
+      case 'sheet_confirm':
+        return (
+          <p className="text-pretty">
+            Make sure every detail is correct. To create your goal, <span className="text-zinc-200">press and hold</span> the{' '}
+            <span className="text-zinc-200">Create goal</span> button until it completes.
+          </p>
+        );
+      default:
+        return null;
+    }
+  }, [step]);
+
+  const sheetTutorialCalloutActive = useMemo(
+    () =>
+      tutorialActive &&
+      sheetCloseLocked &&
+      isAppTutorialSheetPhase(tutorialPhase) &&
+      signOverlayPhase === 'idle' &&
+      !(step === 2 && judgeRequestId),
+    [tutorialActive, sheetCloseLocked, tutorialPhase, signOverlayPhase, step, judgeRequestId],
+  );
+  const tutorialCreateFlowActive = tutorialActive && isAppTutorialSheetPhase(tutorialPhase);
+
+  useEffect(() => {
+    if (!tutorialCreateFlowActive || step !== 1) return;
+    if (stake !== 0) setStake(0);
+    if (customStakeInput !== '') setCustomStakeInput('');
+    if (customStakeError) setCustomStakeError(false);
+  }, [tutorialCreateFlowActive, step, stake, customStakeInput, customStakeError]);
+
   const performSign = async () => {
+    createdGoalIdRef.current = null;
     const signDeadlineErr = getDeadlineValidationError(deadlineDate, deadline.length > 0, allowShortDeadlines);
     if (signDeadlineErr) {
       toast.error(signDeadlineErr);
@@ -581,7 +824,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
         judge: judge!,
         isPrivate,
       };
-      await addGoal(newGoal);
+      createdGoalIdRef.current = await addGoal(newGoal);
       return;
     }
 
@@ -621,6 +864,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     // Best effort: make sure currency is persisted on the created goal, even if
     // edge function deployment lags behind frontend changes.
     if (payload.goalId) {
+      createdGoalIdRef.current = payload.goalId;
       const { error: currencyError } = await supabase
         .from('goals')
         .update({ stake_currency: stakeCurrency })
@@ -651,81 +895,94 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   };
 
   return (
-    <AnimatePresence>
-      {open && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40"
-            onClick={requestClose}
-          />
-          <AlertDialog
-            open={confirmCloseKind !== null}
-            onOpenChange={(next) => {
-              if (!next) setConfirmCloseKind(null);
-            }}
-          >
-            <AlertDialogContent className="max-w-md mx-4 rounded-2xl border-border">
-              <AlertDialogHeader>
-                <AlertDialogTitle className="font-display">
-                  {confirmCloseKind === 'judge-wait' && 'Cancel this judge request?'}
-                  {confirmCloseKind === 'card' && 'Leave card details?'}
-                  {confirmCloseKind === 'sign' && 'Leave before signing?'}
-                </AlertDialogTitle>
-                <AlertDialogDescription className="text-left text-muted-foreground">
-                  {confirmCloseKind === 'judge-wait' && (
-                    <>
-                      {waitingJudgeName
-                        ? `${waitingJudgeName} hasn’t responded yet. `
-                        : 'Your friend hasn’t responded yet. '}
-                      If you leave now, the request will be cancelled and they won’t see it anymore.
-                    </>
-                  )}
-                  {confirmCloseKind === 'card' && (
-                    <>
-                      Your card will be charged only if you complete the goal by the deadline—but you haven’t finished this step yet.
-                      If you leave now, you’ll need to add your payment method again to create this goal.
-                    </>
-                  )}
-                  {confirmCloseKind === 'sign' && (
-                    <>
-                      You haven’t signed the contract yet. If you leave now, this goal won’t be created and you’ll lose this
-                      progress.
-                    </>
-                  )}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter className="gap-2 sm:gap-0">
-                <AlertDialogCancel className="rounded-xl font-display font-semibold mt-0">
-                  {confirmCloseKind === 'judge-wait' && 'Keep waiting'}
-                  {confirmCloseKind === 'card' && 'Keep card step'}
-                  {confirmCloseKind === 'sign' && 'Keep signing'}
-                </AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={confirmCloseDialog}
-                  className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 font-display font-bold"
-                >
-                  {confirmCloseKind === 'judge-wait' && 'Yes, cancel request'}
-                  {confirmCloseKind === 'card' && 'Yes, leave'}
-                  {confirmCloseKind === 'sign' && 'Yes, leave'}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+    <>
+      <AnimatePresence>
+        {open && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40"
+              onClick={() => {
+                if (sheetCloseLocked) return;
+                requestClose();
+              }}
+            />
+            <AlertDialog
+              open={confirmCloseKind !== null}
+              onOpenChange={(next) => {
+                if (!next) setConfirmCloseKind(null);
+              }}
+            >
+              <AlertDialogContent className="max-w-md mx-4 rounded-2xl border-border">
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="font-display">
+                    {confirmCloseKind === 'judge-wait' && 'Cancel this judge request?'}
+                    {confirmCloseKind === 'card' && 'Leave card details?'}
+                    {confirmCloseKind === 'sign' && 'Leave before signing?'}
+                    {confirmCloseKind === 'tutorial-exit' && 'Exit the tutorial?'}
+                  </AlertDialogTitle>
+                  <AlertDialogDescription className="text-left text-muted-foreground">
+                    {confirmCloseKind === 'tutorial-exit' && (
+                      <>
+                        You&apos;ll leave the guided tour and close the goal creator. You can use the app as usual, but the
+                        walkthrough won&apos;t resume from this step.
+                      </>
+                    )}
+                    {confirmCloseKind === 'judge-wait' && (
+                      <>
+                        {waitingJudgeName
+                          ? `${waitingJudgeName} hasn’t responded yet. `
+                          : 'Your friend hasn’t responded yet. '}
+                        If you leave now, the request will be cancelled and they won’t see it anymore.
+                      </>
+                    )}
+                    {confirmCloseKind === 'card' && (
+                      <>
+                        Your card will be charged only if you complete the goal by the deadline—but you haven’t finished this step yet.
+                        If you leave now, you’ll need to add your payment method again to create this goal.
+                      </>
+                    )}
+                    {confirmCloseKind === 'sign' && (
+                      <>
+                        You haven’t signed the contract yet. If you leave now, this goal won’t be created and you’ll lose this
+                        progress.
+                      </>
+                    )}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter className="gap-2 sm:gap-0">
+                  <AlertDialogCancel className="rounded-xl font-display font-semibold mt-0">
+                    {confirmCloseKind === 'judge-wait' && 'Keep waiting'}
+                    {confirmCloseKind === 'card' && 'Keep card step'}
+                    {confirmCloseKind === 'sign' && 'Keep signing'}
+                    {confirmCloseKind === 'tutorial-exit' && 'Keep tutorial'}
+                  </AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={confirmCloseDialog}
+                    className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 font-display font-bold"
+                  >
+                    {confirmCloseKind === 'judge-wait' && 'Yes, cancel request'}
+                    {confirmCloseKind === 'card' && 'Yes, leave'}
+                    {confirmCloseKind === 'sign' && 'Yes, leave'}
+                    {confirmCloseKind === 'tutorial-exit' && 'Yes, exit tutorial'}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
 
-          <motion.div
-            initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            exit={{ y: '100%' }}
-            transition={{ type: 'spring', stiffness: 300, damping: 35 }}
-            className="fixed bottom-0 left-0 right-0 z-50 bg-[#0f0f0f] border-t border-border rounded-t-[32px] h-[640px] max-h-[90vh] overflow-y-visible overflow-x-hidden [color-scheme:dark]"
-            style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-          >
-            <div className="p-6 h-full flex flex-col">
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', stiffness: 300, damping: 35 }}
+              className="fixed bottom-0 left-0 right-0 z-50 bg-[#0f0f0f] border-t border-border rounded-t-[32px] h-[640px] max-h-[90vh] overflow-y-visible overflow-x-hidden [color-scheme:dark]"
+              style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+            >
+            <div className={`relative h-full flex flex-col ${step === 1 ? 'p-5 pt-4' : 'p-6'}`}>
               {/* Header */}
-              <div className="flex items-center justify-between mb-6">
+              <div className={`flex items-center justify-between ${step === 1 ? 'mb-3' : 'mb-6'}`}>
                 <h2 className="text-xl font-display font-bold text-foreground">
                   {step === 0 && 'Define Your Goal'}
                   {step === 1 && 'Set Your Stake'}
@@ -733,18 +990,22 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                   {step === 3 && 'Card details'}
                   {step === 4 && 'Sign the Contract'}
                 </h2>
-                <button
-                  type="button"
-                  onClick={requestClose}
-                  className="p-2 rounded-xl hover:bg-muted transition-colors"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5 text-muted-foreground" />
-                </button>
+                {!sheetCloseLocked ? (
+                  <button
+                    type="button"
+                    onClick={requestClose}
+                    className="p-2 rounded-xl hover:bg-muted transition-colors"
+                    aria-label="Close"
+                  >
+                    <X className="w-5 h-5 text-muted-foreground" />
+                  </button>
+                ) : (
+                  <div className="w-9 h-9 shrink-0" aria-hidden />
+                )}
               </div>
 
               {/* Step indicators */}
-              <div className="flex gap-2 mb-6">
+              <div className={`flex gap-2 ${step === 1 ? 'mb-3' : 'mb-6'}`}>
                 {steps.map((_, i) => {
                   const isCompleted = i <= step;
                   return (
@@ -764,6 +1025,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                   <div>
                     <label className="text-xs uppercase tracking-widest text-muted-foreground mb-2 block">Goal Title</label>
                     <input
+                      ref={goalTitleInputRef}
                       type="text"
                       value={title}
                       onChange={e => setTitle(e.target.value)}
@@ -777,13 +1039,50 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     )}
                   </div>
                   <div>
-                    <label className="text-xs uppercase tracking-widest text-muted-foreground mb-2 block">Description (optional)</label>
+                    <label className="text-xs uppercase tracking-widest text-muted-foreground mb-2 block">
+                      Requirements (optional)
+                    </label>
                     <textarea
+                      ref={requirementsTextareaRef}
                       value={description}
-                      onChange={e => setDescription(e.target.value)}
-                      placeholder="What exactly needs to get done?"
-                      rows={3}
-                      className="block w-full bg-muted rounded-2xl px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                      onChange={(e) => setDescription(e.target.value)}
+                      onFocus={() => {
+                        if (description !== '') return;
+                        const prefix = `${REQUIREMENT_BULLET} `;
+                        setDescription(prefix);
+                        requestAnimationFrame(() => {
+                          const el = requirementsTextareaRef.current;
+                          if (!el) return;
+                          const pos = prefix.length;
+                          el.setSelectionRange(pos, pos);
+                        });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        e.preventDefault();
+                        const el = e.currentTarget;
+                        const v = el.value;
+                        const start = el.selectionStart;
+                        const end = el.selectionEnd;
+                        const ins = `\n${REQUIREMENT_BULLET} `;
+                        const next = v.slice(0, start) + ins + v.slice(end);
+                        setDescription(next);
+                        const pos = start + ins.length;
+                        requestAnimationFrame(() => {
+                          const ta = requirementsTextareaRef.current;
+                          if (!ta) return;
+                          ta.setSelectionRange(pos, pos);
+                        });
+                      }}
+                      onBlur={() => {
+                        setDescription((d) => {
+                          const n = normalizeRequirementLines(d);
+                          return isRequirementsContentEmpty(n) ? '' : n;
+                        });
+                      }}
+                      placeholder={`${REQUIREMENT_BULLET} One clear requirement per line`}
+                      rows={2}
+                      className="block w-full min-h-[3.75rem] bg-muted rounded-2xl px-5 py-4 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none leading-relaxed font-display text-lg"
                     />
                   </div>
                   <div>
@@ -841,13 +1140,17 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                   <div className="flex items-center justify-between p-4 bg-muted rounded-2xl">
                     <div className="flex items-center gap-3">
                       {isPrivate ? <Lock className="w-4 h-4 text-muted-foreground" /> : <Eye className="w-4 h-4 text-muted-foreground" />}
-                      <span className="text-sm text-foreground">{isPrivate ? 'Private goal' : 'Visible to friends'}</span>
+                      <span className="text-sm text-foreground">{isPrivate ? 'Private goal' : 'Goal visible to friends'}</span>
                     </div>
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={!isPrivate}
+                      aria-label={isPrivate ? 'Private goal' : 'Goal visible to friends'}
                       onClick={() => setIsPrivate(!isPrivate)}
-                      className={`w-12 h-7 rounded-full transition-colors relative ${isPrivate ? 'bg-primary' : 'bg-border'}`}
+                      className={`w-12 h-7 rounded-full transition-colors relative ${isPrivate ? 'bg-border' : 'bg-primary'}`}
                     >
-                      <div className={`w-5 h-5 rounded-full bg-foreground absolute top-1 transition-transform ${isPrivate ? 'translate-x-6' : 'translate-x-1'}`} />
+                      <div className={`w-5 h-5 rounded-full bg-foreground absolute top-1 transition-transform ${isPrivate ? 'translate-x-1' : 'translate-x-6'}`} />
                     </button>
                   </div>
                 </div>
@@ -855,90 +1158,88 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
               {/* Step 1: Stake */}
               {step === 1 && (
-                <div className="space-y-5 flex-1">
-                  <div className="text-center py-4">
-                    <p className="text-xs uppercase tracking-widest text-muted-foreground mb-4">Your Stake</p>
+                <div className="flex flex-1 flex-col gap-2">
+                  <div className="text-center py-1">
+                    <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Your Stake</p>
                     <motion.div
                       key={stake}
                       initial={{ scale: 1 }}
                       animate={{ scale: [1, 1.05, 1] }}
                       transition={{ duration: 0.2 }}
-                      className="text-6xl font-display font-extrabold text-primary tabular-nums tracking-tighter"
+                      className="text-5xl font-display font-extrabold text-primary tabular-nums tracking-tighter leading-none"
                     >
                       {formatStakeAmount(stake, stakeCurrency)}
                     </motion.div>
-                    <p className="text-sm text-muted-foreground mt-4">
-                      Put money on the line!
-                      <br />
-                      If you fail, this amount will be charged.
-                    </p>
                   </div>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-4 gap-1.5">
                     {presetStakes.map(amount => (
                       <button
                         key={amount}
                         type="button"
+                        disabled={tutorialCreateFlowActive}
                         onClick={() => {
                           setStake(amount);
                           setCustomStakeInput('');
                         }}
-                        className={`py-3 rounded-2xl font-display font-bold text-sm transition-all ${
+                        className={`py-2 rounded-xl font-display font-bold text-xs transition-all sm:text-sm ${
                           customStakeInput === '' && stake === amount
                             ? 'bg-primary text-primary-foreground glow-primary'
                             : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                        }`}
+                        } ${tutorialCreateFlowActive ? 'opacity-60 cursor-not-allowed hover:bg-muted' : ''}
+                        `}
                       >
                         {amount === 0 ? 'Free' : formatStakePresetAmount(amount, stakeCurrency)}
                       </button>
                     ))}
                   </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-                      <Heart className="h-3.5 w-3.5" aria-hidden />
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground">
+                      <Heart className="h-3 w-3 shrink-0" aria-hidden />
                       <span>If you fail, stake goes to</span>
                     </div>
                     {stake > 0 ? (
-                      <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-1">
                         {CHARITY_OPTIONS.map((c) => (
                           <button
                             key={c.id}
                             type="button"
                             onClick={() => setSelectedCharityId(c.id)}
-                            className={`w-full rounded-2xl border px-4 py-3 text-left transition-colors ${
+                            className={`w-full rounded-xl border px-3 py-2 text-left transition-colors ${
                               selectedCharityId === c.id
                                 ? 'border-primary bg-primary/10 ring-1 ring-primary/30'
                                 : 'border-border bg-muted/50 hover:bg-muted/80'
                             }`}
                           >
-                            <p className="font-display font-semibold text-sm text-foreground">{c.name}</p>
+                            <p className="font-display font-semibold text-sm text-foreground leading-tight">{c.name}</p>
                             {c.subtitle ? (
-                              <p className="mt-1 text-xs text-muted-foreground leading-snug">{c.subtitle}</p>
+                              <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug">{c.subtitle}</p>
                             ) : null}
                           </button>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground rounded-2xl border border-border bg-muted/30 px-4 py-3">
+                      <p className="text-[11px] text-muted-foreground rounded-xl border border-border bg-muted/30 px-3 py-2 leading-snug">
                         Pick a paid stake above to choose a charity. Free goals are not charged.
                       </p>
                     )}
                     {stake > 0 ? (
-                      <p className="text-[11px] text-muted-foreground/90 leading-snug px-0.5">
+                      <p className="text-[10px] text-muted-foreground/90 leading-snug px-0.5">
                         Automatic transfer to the charity uses Stripe Connect. Until each charity has an{' '}
                         <code className="text-foreground/80">acct_…</code> id in the server config, charges still work but
                         funds stay on your platform account for manual payout.
                       </p>
                     ) : null}
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-xs uppercase tracking-widest text-muted-foreground block">
+                  <div className="space-y-1.5 pb-0.5">
+                    <label className="text-[11px] uppercase tracking-widest text-muted-foreground block">
                       Or custom amount
                     </label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground font-display">{stakeCurrency.toUpperCase()}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground font-display text-sm">{stakeCurrency.toUpperCase()}</span>
                       <input
                         type="text"
                         inputMode="decimal"
+                        disabled={tutorialCreateFlowActive}
                         value={customStakeInput || (presetStakes.includes(stake) ? '' : stake.toString())}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -986,23 +1287,18 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                             rounded === Math.floor(rounded) ? rounded.toString() : rounded.toFixed(2)
                           );
                         }}
-                        className={`flex-1 bg-muted rounded-2xl px-4 py-3 text-foreground font-display font-semibold tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 [color-scheme:dark] border ${
+                        className={`flex-1 bg-muted rounded-xl px-3 py-2 text-sm text-foreground font-display font-semibold tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 [color-scheme:dark] border ${
                           customStakeError ? 'border-destructive ring-destructive' : 'border-transparent focus:ring-primary'
-                        }`}
+                        } ${tutorialCreateFlowActive ? 'opacity-60 cursor-not-allowed' : ''}`}
                       />
                     </div>
-                    <div className="space-y-1.5 text-xs text-muted-foreground">
+                    <div className="space-y-1 text-[11px] text-muted-foreground leading-snug">
+                      <p>Minimum paid stake: {formatStakeAmount(minimumStake, stakeCurrency)}.</p>
                       <p>
-                        Minimum paid stake: {formatStakeAmount(minimumStake, stakeCurrency)} (never below US$1; rate
-                        updates over time).
-                      </p>
-                      <p>
-                        If the stake is charged: Stripe keeps its processing fee (often around{' '}
-                        <span className="text-foreground/90">2.9% + US$0.30</span> on US cards — varies by card and
-                        country). The app retains <span className="text-foreground/90">3.8% + US$0.20</span> as a platform
-                        fee. The rest is transferred to the charity you selected when Stripe Connect is configured for
-                        that charity. Non-USD stakes settle in {stakeCurrency.toUpperCase()}; US dollar figures are
-                        approximate.
+                        If the stake is charged, the combined payment processing and app fee is{' '}
+                        <span className="text-foreground/90">6.7% + US$0.50</span>. The rest is transferred to the charity
+                        you selected. Non-USD stakes settle in {stakeCurrency.toUpperCase()}; the US dollar fixed fee is
+                        approximate at other currencies.
                       </p>
                       <p>
                         If your card is billed in another currency, your bank may charge a separate conversion fee we do
@@ -1068,7 +1364,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         </div>
                       </button>
 
-                      <p className="text-xs uppercase tracking-widest text-muted-foreground pt-2">Your Friends</p>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground">Your Friends</p>
 
                       <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
                         {friends.map(friend => (
@@ -1091,13 +1387,119 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                           </button>
                         ))}
                       </div>
+
+                      <div className="rounded-2xl border border-border bg-muted/25 p-4 space-y-3">
+                        <div className="flex gap-3">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted">
+                            <UserPlus className="h-4 w-4 text-muted-foreground" aria-hidden />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-display font-semibold text-foreground">Add by Friend ID</p>
+                            <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
+                              Find someone by their 11-digit ID. They must accept your friend request before you can invite
+                              them as judge.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            autoComplete="off"
+                            value={judgeByIdInput}
+                            onChange={(e) => {
+                              setJudgeByIdInput(e.target.value);
+                              setJudgeByIdError(null);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') void searchJudgeByFriendId();
+                            }}
+                            placeholder="11-digit Friend ID"
+                            className="min-w-0 flex-1 rounded-xl bg-background/60 px-3 py-2.5 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary [color-scheme:dark]"
+                          />
+                          <button
+                            type="button"
+                            disabled={judgeByIdSearching}
+                            onClick={() => void searchJudgeByFriendId()}
+                            className="shrink-0 rounded-xl bg-primary px-4 py-2.5 text-sm font-display font-bold text-primary-foreground disabled:opacity-50"
+                          >
+                            {judgeByIdSearching ? '…' : 'Find'}
+                          </button>
+                        </div>
+                        {judgeByIdError ? <p className="text-xs text-destructive">{judgeByIdError}</p> : null}
+                        {judgeByIdResult ? (
+                          <div className="flex items-center gap-3 rounded-xl border border-border bg-background/40 px-3 py-2.5">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted font-display font-bold text-muted-foreground">
+                              {(judgeByIdResult.display_name || 'U').charAt(0)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-display font-semibold text-sm text-foreground">
+                                {judgeByIdResult.display_name || 'User'}
+                              </p>
+                              {judgeByIdResult.friend_code ? (
+                                <p className="text-[11px] tabular-nums text-muted-foreground">{judgeByIdResult.friend_code}</p>
+                              ) : null}
+                            </div>
+                            {friends.some((f) => f.id === judgeByIdResult.id) ? (
+                              <button
+                                type="button"
+                                onClick={() => selectJudgeFromLookup(judgeByIdResult)}
+                                className="shrink-0 rounded-lg bg-primary px-3 py-2 text-xs font-display font-bold text-primary-foreground"
+                              >
+                                {judge?.id === judgeByIdResult.id ? 'Selected' : 'Choose judge'}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={judgeByIdSending}
+                                onClick={() => void sendJudgeByIdFriendRequest()}
+                                className="shrink-0 rounded-lg bg-emerald-500/90 px-3 py-2 text-xs font-display font-bold text-emerald-950 disabled:opacity-60"
+                              >
+                                {judgeByIdSending ? '…' : 'Send request'}
+                              </button>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Step 3: Card details (only when stake > 0) */}
-              {step === 3 && stripePromise && (
+              {/* Step 3: Card details */}
+              {step === 3 && tutorialCreateFlowActive && (
+                <div className="flex flex-col flex-1 min-h-0">
+                  <div className="space-y-6 flex-1">
+                    <p className="text-sm text-muted-foreground">
+                      Tutorial preview: this is where card details are entered for paid stakes. Since this tutorial uses a
+                      free stake, no card input is required.
+                    </p>
+                    <div className="rounded-2xl border border-border bg-muted/30 p-4">
+                      <p className="text-sm font-display font-semibold text-foreground">Card details preview</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        In a real paid goal, you would enter your card details here.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 mt-8">
+                    <button
+                      type="button"
+                      onClick={goBack}
+                      className="flex-1 py-4 rounded-2xl bg-muted text-muted-foreground font-display font-semibold"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStep(4)}
+                      className="flex-1 py-4 rounded-2xl bg-primary text-primary-foreground font-display font-bold"
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </div>
+              )}
+              {step === 3 && !tutorialCreateFlowActive && stripePromise && (
                 <Elements stripe={stripePromise}>
                   <div className="flex flex-col flex-1 min-h-0">
                     <CardStepFields stake={stake} stakeCurrency={stakeCurrency} />
@@ -1194,7 +1596,13 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         return true;
                       }}
                       onPublish={performSign}
-                      onSuccess={handleClose}
+                      onSuccess={() => {
+                        if (tutorialActive && isAppTutorialSheetPhase(tutorialPhase)) {
+                          onGoalCreatedInTutorial(createdGoalIdRef.current);
+                        }
+                        createdGoalIdRef.current = null;
+                        handleClose();
+                      }}
                       onPhaseChange={(p: PublishPhase) => {
                         if (p === 'publishing') setSignOverlayPhase('loading');
                         else if (p === 'success') setSignOverlayPhase('success');
@@ -1208,12 +1616,12 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
               {/* Navigation: hide on card & confirm (those steps use Back + primary in a row) */}
               {step < 4 && step !== 3 && !(step === 2 && Boolean(judgeRequestId)) && (
-                <div className="flex gap-3 mt-8">
+                <div className={`flex gap-3 ${step === 1 ? 'mt-3' : 'mt-8'}`}>
                   {step > 0 && (
                     <button
                       type="button"
                       onClick={goBack}
-                      className="flex-1 py-4 rounded-2xl bg-muted text-muted-foreground font-display font-semibold"
+                      className={`flex-1 rounded-2xl bg-muted text-muted-foreground font-display font-semibold ${step === 1 ? 'py-3' : 'py-4'}`}
                     >
                       Back
                     </button>
@@ -1222,7 +1630,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     type="button"
                     onClick={() => canNext() && goNext()}
                     disabled={!canNext()}
-                    className="flex-1 py-4 rounded-2xl bg-primary text-primary-foreground font-display font-bold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className={`flex-1 rounded-2xl bg-primary text-primary-foreground font-display font-bold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${step === 1 ? 'py-3' : 'py-4'}`}
                   >
                     Continue <ChevronRight className="w-4 h-4" />
                   </button>
@@ -1230,8 +1638,31 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               )}
             </div>
           </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+          </>
+        )}
+      </AnimatePresence>
+
+      {open && sheetTutorialCalloutActive ? (
+        <div
+          className="fixed left-0 right-0 z-[45] flex justify-center px-4 pointer-events-none sm:px-6"
+          style={{
+            bottom: 'calc(min(640px, 90vh) + env(safe-area-inset-bottom, 0px) + 12px)',
+          }}
+        >
+          <div className="pointer-events-auto w-full max-w-xl">
+            <TutorialCard
+              variant="chrome"
+              exitPlacement="top-right"
+              onExit={() => setConfirmCloseKind('tutorial-exit')}
+              onGoBack={handleTutorialSheetGoBack}
+              progressCurrent={progressCurrent}
+              progressTotal={progressTotal}
+              body={tutorialSheetOverlayBody}
+              bodyClassName="max-h-[min(340px,48vh)] overflow-y-auto pr-1"
+            />
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import * as React from "react";
 import { motion } from "framer-motion";
-import { Calendar, CheckCircle2, CircleX, IdCard, Mail, Pencil, Trophy, User } from "lucide-react";
+import { Calendar, Camera, CheckCircle2, CircleX, IdCard, Loader2, Mail, Pencil, Trophy, User } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useGoals } from "@/hooks/useGoals";
 import { useGoalsAsJudge } from "@/hooks/useGoalsAsJudge";
@@ -12,10 +12,13 @@ import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import {
+  dispatchProfileAvatarUpdated,
+  writeProfileAvatarToStorage,
+} from "@/lib/profileAvatarEvents";
+import { resizeImageToJpegBlob } from "@/lib/resizeAvatarImage";
 
 type ProfileRow = {
   display_name: string;
@@ -90,9 +93,11 @@ function ProfileInner() {
   const [friendCode, setFriendCode] = useState<string | null>(null);
   const [friendCodeDbReady, setFriendCodeDbReady] = useState(true);
 
-  const [editOpen, setEditOpen] = useState(false);
+  const [isInlineEditingName, setIsInlineEditingName] = useState(false);
   const [editDisplayName, setEditDisplayName] = useState("");
   const [editSaving, setEditSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -196,13 +201,134 @@ function ProfileInner() {
   }, [user?.id, user?.displayName]);
 
   useEffect(() => {
-    if (!editOpen) return;
-    setEditDisplayName(profile?.display_name ?? user?.displayName ?? "");
-  }, [editOpen, profile?.display_name, user?.displayName]);
+    if (!user?.id || profileLoading) return;
+    const url = profile?.avatar_url?.trim();
+    writeProfileAvatarToStorage(user.id, url || null);
+  }, [user?.id, profile?.avatar_url, profileLoading]);
 
   const email = user?.email ?? "guest@example.com";
   const displayName = profile?.display_name || user?.displayName || (email ? email.split("@")[0] : "Guest");
   const initial = (displayName || "Guest").trim().charAt(0).toUpperCase();
+
+  const saveDisplayName = async () => {
+    if (!user?.id) return;
+    const displayNameInput = editDisplayName.trim();
+    if (!displayNameInput) {
+      toast.error("Display name is required.");
+      return;
+    }
+
+    setEditSaving(true);
+    try {
+      const payload = {
+        display_name: displayNameInput,
+      };
+
+      const { data: updatedData, error } = await supabase
+        .from("profiles")
+        .update(payload)
+        .eq("id", user.id)
+        .select("display_name")
+        .maybeSingle();
+
+      if (error) {
+        const msg = String((error as { message?: unknown } | null)?.message ?? "");
+        toast.error(msg || "Could not save profile.");
+        return;
+      }
+
+      const updated = updatedData as unknown as { display_name: string } | null;
+
+      setProfile((prev) => {
+        const base =
+          prev ?? ({
+            display_name: user.displayName ?? "",
+            avatar_url: null,
+            created_at: null,
+          } satisfies ProfileRow);
+        return {
+          ...base,
+          display_name: updated?.display_name ?? displayNameInput,
+        };
+      });
+
+      try {
+        await supabase.auth.updateUser({
+          data: { display_name: displayNameInput },
+        });
+      } catch (e) {
+        console.error("Failed to update auth user_metadata display_name", e);
+        toast.message("Saved profile name, but auth display name may take a moment.");
+      }
+
+      setIsInlineEditingName(false);
+      toast.success("Profile updated.");
+    } catch (err) {
+      console.error("Error saving profile", err);
+      toast.error("Could not save profile. Please try again.");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !user?.id) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please choose an image.");
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error("Image is too large. Use one under 15 MB.");
+      return;
+    }
+    setAvatarUploading(true);
+    try {
+      const blob = await resizeImageToJpegBlob(file);
+      const path = `${user.id}/avatar.jpg`;
+      const { error: uploadError } = await supabase.storage.from("avatars").upload(path, blob, {
+        contentType: "image/jpeg",
+        upsert: true,
+      });
+      if (uploadError) throw uploadError;
+      const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+      const urlWithV = `${pub.publicUrl}${pub.publicUrl.includes("?") ? "&" : "?"}v=${Date.now()}`;
+      const { error: dbError } = await supabase.from("profiles").update({ avatar_url: urlWithV }).eq("id", user.id);
+      if (dbError) throw dbError;
+      setProfile((prev) => {
+        const base =
+          prev ??
+          ({
+            display_name: user.displayName ?? "",
+            avatar_url: null,
+            created_at: null,
+          } satisfies ProfileRow);
+        return { ...base, avatar_url: urlWithV };
+      });
+      writeProfileAvatarToStorage(user.id, urlWithV);
+      dispatchProfileAvatarUpdated();
+      toast.success("Profile photo updated.");
+    } catch (err) {
+      console.error("Avatar upload", err);
+      const message = String((err as { message?: string })?.message ?? err ?? "");
+      const lower = message.toLowerCase();
+      if (lower.includes("bucket") || lower.includes("not found")) {
+        toast.error("Photo upload needs the avatars bucket on Supabase.", {
+          description:
+            "Dashboard → SQL → paste and run supabase/scripts/create_avatars_bucket.sql, or run: npx supabase db push",
+        });
+      } else if (lower.includes("row-level security") || lower.includes("violates") || lower.includes("policy")) {
+        toast.error("Storage blocked this upload (missing policies).", {
+          description: "Run supabase/scripts/create_avatars_bucket.sql in the Supabase SQL Editor.",
+        });
+      } else {
+        toast.error("Could not update photo.", { description: message || "Try again." });
+      }
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
 
   const createdAt = profile?.created_at ? new Date(profile.created_at) : null;
 
@@ -313,27 +439,79 @@ function ProfileInner() {
         <Card className="p-5 rounded-[20px] bg-card border border-border">
           <div className="flex items-start gap-4">
             <div className="shrink-0">
-              <Avatar className="h-14 w-14 rounded-2xl">
-                <AvatarImage src={profile?.avatar_url || ""} alt={displayName} />
-                <AvatarFallback>{initial}</AvatarFallback>
-              </Avatar>
+              <input
+                ref={avatarFileInputRef}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                onChange={handleAvatarFileChange}
+              />
+              <button
+                type="button"
+                disabled={!user?.id || avatarUploading || profileLoading}
+                onClick={() => avatarFileInputRef.current?.click()}
+                className="relative rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
+                aria-label="Change profile photo"
+              >
+                <Avatar className="h-20 w-20 rounded-full">
+                  <AvatarImage src={profile?.avatar_url || ""} alt={displayName} className="object-cover" />
+                  <AvatarFallback className="rounded-full text-xl font-display font-semibold">{initial}</AvatarFallback>
+                </Avatar>
+                <span className="absolute -bottom-0.5 -right-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md ring-2 ring-card">
+                  {avatarUploading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Camera className="h-4 w-4" aria-hidden />
+                  )}
+                </span>
+              </button>
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="font-display font-semibold text-foreground truncate">{displayName}</p>
-                  <p className="text-xs text-muted-foreground mt-1 truncate">{email}</p>
+                  {isInlineEditingName ? (
+                    <Input
+                      id="editDisplayName"
+                      className="h-9 px-2 py-1 font-display font-semibold"
+                      value={editDisplayName}
+                      onChange={(e) => setEditDisplayName(e.target.value)}
+                      autoComplete="name"
+                      autoFocus
+                      onBlur={() => {
+                        void saveDisplayName();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void saveDisplayName();
+                        }
+                        if (e.key === "Escape") {
+                          setIsInlineEditingName(false);
+                          setEditDisplayName(displayName);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <p className="font-display font-semibold text-foreground truncate">{displayName}</p>
+                  )}
                 </div>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => setEditOpen(true)}
-                  disabled={!user?.id}
-                  className="shrink-0"
+                  onClick={() => {
+                    if (isInlineEditingName) {
+                      void saveDisplayName();
+                      return;
+                    }
+                    setEditDisplayName(displayName);
+                    setIsInlineEditingName(true);
+                  }}
+                  disabled={!user?.id || editSaving}
+                  className={`shrink-0 ${isInlineEditingName ? "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 hover:text-emerald-300" : ""}`}
                 >
                   <Pencil className="w-4 h-4" />
-                  Edit
+                  {isInlineEditingName ? "Save" : "Edit"}
                 </Button>
               </div>
               <div className="mt-3 space-y-2">
@@ -392,102 +570,6 @@ function ProfileInner() {
             </div>
           </div>
         </Card>
-
-        <Dialog open={editOpen} onOpenChange={setEditOpen}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Edit account</DialogTitle>
-              <DialogDescription>Update your display info and friend ID.</DialogDescription>
-            </DialogHeader>
-
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (!user?.id) return;
-
-                const displayNameInput = editDisplayName.trim();
-                if (!displayNameInput) {
-                  toast.error("Display name is required.");
-                  return;
-                }
-
-                setEditSaving(true);
-                try {
-                  const payload = {
-                    display_name: displayNameInput,
-                  };
-
-                  const { data: updatedData, error } = await supabase
-                    .from("profiles")
-                    .update(payload)
-                    .eq("id", user.id)
-                    .select("display_name")
-                    .maybeSingle();
-
-                  if (error) {
-                    const msg = String((error as { message?: unknown } | null)?.message ?? "");
-                    toast.error(msg || "Could not save profile.");
-                    return;
-                  }
-
-                  const updated = updatedData as unknown as { display_name: string } | null;
-
-                  setProfile((prev) => {
-                    const base =
-                      prev ?? ({
-                        display_name: user.displayName ?? "",
-                        avatar_url: null,
-                        created_at: null,
-                      } satisfies ProfileRow);
-                    return {
-                      ...base,
-                      display_name: updated?.display_name ?? displayNameInput,
-                    };
-                  });
-
-                // `UserProfilePopover` renders from Supabase Auth user metadata (via `useAuth`),
-                // not from `profiles`. Keep both in sync so the new name shows everywhere.
-                try {
-                  await supabase.auth.updateUser({
-                    data: { display_name: displayNameInput },
-                  });
-                } catch (e) {
-                  console.error("Failed to update auth user_metadata display_name", e);
-                  toast.message("Saved profile name, but auth display name may take a moment.");
-                }
-
-                  setEditOpen(false);
-                  toast.success("Profile updated.");
-                } catch (err) {
-                  console.error("Error saving profile", err);
-                  toast.error("Could not save profile. Please try again.");
-                } finally {
-                  setEditSaving(false);
-                }
-              }}
-              className="space-y-4"
-            >
-              <div className="space-y-2">
-                <Label htmlFor="editDisplayName">Display name</Label>
-                <Input
-                  id="editDisplayName"
-                  value={editDisplayName}
-                  onChange={(e) => setEditDisplayName(e.target.value)}
-                  autoComplete="name"
-                />
-              </div>
-
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setEditOpen(false)} disabled={editSaving}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={editSaving || !user?.id}>
-                  {editSaving ? "Saving..." : "Save changes"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
 
         <div className="p-5 rounded-[20px] bg-card border border-border">
           <h2 className="text-sm font-display font-semibold text-foreground">Your stats</h2>

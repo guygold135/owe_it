@@ -12,6 +12,8 @@ type AuthUser = {
   id: string;
   email: string;
   displayName?: string;
+  /** From user_metadata; used to open the first-run app tutorial. */
+  needsAppTutorial?: boolean;
 };
 
 /**
@@ -90,11 +92,11 @@ function useProvideAuth(): AuthContextValue {
         u.raw_user_meta_data?.display_name ||
         (u.email ? String(u.email).split('@')[0] : '');
 
+      // Do not set avatar_url here — it would overwrite the user's saved photo on every session refresh.
       const { error } = await supabase.from('profiles').upsert(
         {
           id: u.id,
           display_name: displayName ?? '',
-          avatar_url: null,
         } as any,
         { onConflict: 'id' } as any
       );
@@ -102,6 +104,29 @@ function useProvideAuth(): AuthContextValue {
       if (error) {
         // Profile creation shouldn't block auth; log for debugging.
         console.error('Error ensuring profile', error);
+        return;
+      }
+
+      // OAuth (and similar) signups do not pass needs_app_tutorial in signUp options. If the profile is brand new and
+      // the tutorial has not been completed, set metadata so AppTutorial can pick it up after USER_UPDATED.
+      const alreadyMeta = u.user_metadata?.needs_app_tutorial === true;
+      if (!alreadyMeta) {
+        const { data: prof, error: profErr } = await supabase
+          .from('profiles')
+          .select('app_tutorial_done_at, created_at')
+          .eq('id', u.id)
+          .maybeSingle();
+
+        if (!profErr && prof && (prof as { app_tutorial_done_at?: string | null }).app_tutorial_done_at == null) {
+          const createdRaw = (prof as { created_at?: string }).created_at;
+          const createdMs = createdRaw ? new Date(createdRaw).getTime() : 0;
+          const isFreshProfile =
+            createdMs > 0 && !Number.isNaN(createdMs) && Date.now() - createdMs < 5 * 60 * 1000;
+          if (isFreshProfile) {
+            const { error: metaErr } = await supabase.auth.updateUser({ data: { needs_app_tutorial: true } });
+            if (metaErr) console.error('Error setting tutorial metadata', metaErr);
+          }
+        }
       }
     };
 
@@ -114,6 +139,7 @@ function useProvideAuth(): AuthContextValue {
           u.user_metadata?.display_name ||
           u.raw_user_meta_data?.display_name ||
           undefined,
+        needsAppTutorial: u.user_metadata?.needs_app_tutorial === true,
       };
     };
 
@@ -231,7 +257,7 @@ function useProvideAuth(): AuthContextValue {
       email,
       password,
       options: {
-        data: { display_name: displayName },
+        data: { display_name: displayName, needs_app_tutorial: true },
         emailRedirectTo: authEmailRedirectTo(),
       },
     });

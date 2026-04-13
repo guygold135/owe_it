@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useGoals } from '@/hooks/useGoals';
 import { useDeadlineReminderTriggers } from '@/hooks/useDeadlineReminderTriggers';
@@ -8,14 +8,25 @@ import { useDashboardVisibleContracts } from '@/hooks/useDashboardVisibleContrac
 import { useResolvedGoalSpotlight } from '@/hooks/useResolvedGoalSpotlight';
 import { StakeCard } from '@/components/StakeCard';
 import { ResolvedGoalSpotlight } from '@/components/ResolvedGoalSpotlight';
-import { DollarSign, Target, Trophy } from 'lucide-react';
+import { DollarSign, Trophy } from 'lucide-react';
 import UserProfilePopover from '@/components/UserProfilePopover';
 import { DashboardStatsSkeleton, GoalsListSkeleton } from '@/components/PageSkeletons';
 import { convertStakeAmount, formatStakeAmount } from '@/lib/currency';
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
+import { isTutorialCreatedGoal, unmarkTutorialCreatedGoal } from '@/lib/appTutorial';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function Dashboard() {
-  const { goals, loading, loadGoals } = useGoals();
+  const { goals, loading, loadGoals, deleteGoal } = useGoals();
   const { currency: selectedCurrency } = useStakeCurrencyPreference();
   useAutoExpireGoals(goals, loadGoals, { enabled: true, loading });
   const activeGoals = goals.filter(g => g.status === 'active');
@@ -36,6 +47,7 @@ export default function Dashboard() {
   const completed = goals.filter(g => g.status === 'completed').length;
   const spotlightGoals = useResolvedGoalSpotlight(goals);
   const contractGoals = useDashboardVisibleContracts(goals);
+  const [tutorialDeleteGoalId, setTutorialDeleteGoalId] = useState<string | null>(null);
   const sortedContractGoals = useMemo(
     () =>
       [...contractGoals].sort((a, b) => {
@@ -46,6 +58,9 @@ export default function Dashboard() {
       }),
     [contractGoals],
   );
+  const tutorialGoalIds = useMemo(() => {
+    return new Set(goals.filter((g) => isTutorialCreatedGoal(g.id)).map((g) => g.id));
+  }, [goals]);
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -91,17 +106,31 @@ export default function Dashboard() {
                 <p className="text-xs text-muted-foreground mt-0.5">At Risk</p>
               </div>
               <div className="text-center">
-                <div className="w-10 h-10 mx-auto rounded-2xl bg-muted flex items-center justify-center mb-2">
-                  <Target className="w-5 h-5 text-muted-foreground" />
+                <div className="w-10 h-10 mx-auto rounded-2xl bg-orange-500/10 flex items-center justify-center mb-2">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="icon icon-tabler icons-tabler-outline icon-tabler-flame w-5 h-5 text-orange-400"
+                  >
+                    <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                    <path d="M12 10.941c2.333 -3.308 .167 -7.823 -1 -8.941c0 3.395 -2.235 5.299 -3.667 6.706c-1.43 1.408 -2.333 3.294 -2.333 5.588c0 3.704 3.134 6.706 7 6.706c3.866 0 7 -3.002 7 -6.706c0 -1.712 -1.232 -4.403 -2.333 -5.588c-2.084 3.353 -3.257 3.353 -4.667 2.235" />
+                  </svg>
                 </div>
-                <p className="text-2xl font-display font-extrabold text-foreground tabular-nums">{activeGoals.length}</p>
+                <p className="text-2xl font-display font-extrabold text-orange-400 tabular-nums">{activeGoals.length}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">Active</p>
               </div>
               <div className="text-center">
-                <div className="w-10 h-10 mx-auto rounded-2xl bg-muted flex items-center justify-center mb-2">
-                  <Trophy className="w-5 h-5 text-muted-foreground" />
+                <div className="w-10 h-10 mx-auto rounded-2xl bg-amber-500/10 flex items-center justify-center mb-2">
+                  <Trophy className="w-5 h-5 text-amber-400" />
                 </div>
-                <p className="text-2xl font-display font-extrabold text-foreground tabular-nums">{completed}</p>
+                <p className="text-2xl font-display font-extrabold text-amber-400 tabular-nums">{completed}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">Completed</p>
               </div>
             </div>
@@ -121,7 +150,12 @@ export default function Dashboard() {
             <ResolvedGoalSpotlight goals={spotlightGoals} />
             <div className="space-y-4">
               {sortedContractGoals.map((goal) => (
-                <StakeCard key={goal.id} goal={goal} />
+                <StakeCard
+                  key={goal.id}
+                  goal={goal}
+                  tutorialCreated={tutorialGoalIds.has(goal.id)}
+                  onDeleteTutorialGoal={(goalId) => setTutorialDeleteGoalId(goalId)}
+                />
               ))}
               {sortedContractGoals.length === 0 && (
                 <div className="text-center py-16">
@@ -133,6 +167,34 @@ export default function Dashboard() {
           </div>
         </>
       )}
+      <AlertDialog open={tutorialDeleteGoalId !== null} onOpenChange={(o) => !o && setTutorialDeleteGoalId(null)}>
+        <AlertDialogContent className="max-w-md rounded-2xl border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-display">Delete tutorial goal?</AlertDialogTitle>
+            <AlertDialogDescription className="text-left text-muted-foreground">
+              This goal is deletable only because it was created during the tutorial. Future goals are real commitment
+              contracts and cannot be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-xl font-display font-semibold mt-0">Keep goal</AlertDialogCancel>
+            <AlertDialogAction
+              className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 font-display font-bold"
+              onClick={async () => {
+                if (!tutorialDeleteGoalId) return;
+                try {
+                  await deleteGoal(tutorialDeleteGoalId);
+                  unmarkTutorialCreatedGoal(tutorialDeleteGoalId);
+                } finally {
+                  setTutorialDeleteGoalId(null);
+                }
+              }}
+            >
+              Yes, delete tutorial goal
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

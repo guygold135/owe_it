@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from 'react';
+import { QueryClient, QueryClientProvider, useIsFetching } from "@tanstack/react-query";
 import { Capacitor } from '@capacitor/core';
 import { BrowserRouter, HashRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -7,6 +7,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BottomNav } from "@/components/BottomNav";
 import { CreateGoalSheet } from "@/components/CreateGoalSheet";
+import { AppTutorialChrome } from "@/components/AppTutorialChrome";
+import { AppTutorialProvider, useAppTutorial } from "@/hooks/useAppTutorial";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { useAbandonStaleJudgeRequestsOnBootstrap } from "@/hooks/useAbandonStaleJudgeRequestsOnBootstrap";
 import Dashboard from "./pages/Dashboard";
@@ -40,7 +42,43 @@ const queryClient = new QueryClient({
 function AppRoutes() {
   const { user, loading, passwordRecoveryPending } = useAuth();
   const [createOpen, setCreateOpen] = useState(false);
+  const [showSessionSplash, setShowSessionSplash] = useState(false);
+  const [splashMinElapsed, setSplashMinElapsed] = useState(false);
+  const [splashMaxElapsed, setSplashMaxElapsed] = useState(false);
   useAbandonStaleJudgeRequestsOnBootstrap(user?.id);
+
+  const appReadyForRouting = !loading && !(passwordRecoveryPending && !user);
+
+  useEffect(() => {
+    const key = 'owe_it_session_logo_splash_seen_v1';
+    if (window.sessionStorage.getItem(key) === '1') return;
+    window.sessionStorage.setItem(key, '1');
+    setShowSessionSplash(true);
+    const minTimer = window.setTimeout(() => setSplashMinElapsed(true), 1000);
+    const maxTimer = window.setTimeout(() => setSplashMaxElapsed(true), 3000);
+    return () => {
+      window.clearTimeout(minTimer);
+      window.clearTimeout(maxTimer);
+    };
+  }, []);
+
+  const shouldShowLogoSplash = useMemo(() => {
+    if (!showSessionSplash) return false;
+    if (!splashMinElapsed) return true; // Always show for first second.
+    return !appReadyForRouting && !splashMaxElapsed; // Keep up to 3s while app is still loading.
+  }, [showSessionSplash, splashMinElapsed, appReadyForRouting, splashMaxElapsed]);
+
+  if (shouldShowLogoSplash) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <img
+          src="/favicon-full.svg"
+          alt="Owe It"
+          className="block h-[18.2rem] w-[18.2rem] sm:h-[20.8rem] sm:w-[20.8rem] object-contain animate-pop-in"
+        />
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -72,6 +110,61 @@ function AppRoutes() {
   }
 
   return (
+    <AppTutorialProvider
+      createGoalOpen={createOpen}
+      onRequestOpenCreateGoal={() => setCreateOpen(true)}
+    >
+      <LoggedInAppShell createOpen={createOpen} setCreateOpen={setCreateOpen} />
+    </AppTutorialProvider>
+  );
+}
+
+function LoggedInAppShell({
+  createOpen,
+  setCreateOpen,
+}: {
+  createOpen: boolean;
+  setCreateOpen: (v: boolean) => void;
+}) {
+  const { fabSpotlight, onFabPhaseCreateOpened, highlightNavTab } = useAppTutorial();
+  const isFetching = useIsFetching();
+  const [showShellSplash, setShowShellSplash] = useState(false);
+  const [shellSplashMinElapsed, setShellSplashMinElapsed] = useState(false);
+  const [shellSplashMaxElapsed, setShellSplashMaxElapsed] = useState(false);
+
+  useEffect(() => {
+    const key = 'owe_it_session_main_shell_logo_splash_seen_v1';
+    if (window.sessionStorage.getItem(key) === '1') return;
+    window.sessionStorage.setItem(key, '1');
+    setShowShellSplash(true);
+    const minTimer = window.setTimeout(() => setShellSplashMinElapsed(true), 1000);
+    const maxTimer = window.setTimeout(() => setShellSplashMaxElapsed(true), 3000);
+    return () => {
+      window.clearTimeout(minTimer);
+      window.clearTimeout(maxTimer);
+    };
+  }, []);
+
+  const shouldShowShellSplash = useMemo(() => {
+    if (!showShellSplash) return false;
+    if (!shellSplashMinElapsed) return true; // Always show for first second.
+    const shellStillLoading = isFetching > 0;
+    return shellStillLoading && !shellSplashMaxElapsed; // Keep up to 3s while first shell data is loading.
+  }, [showShellSplash, shellSplashMinElapsed, shellSplashMaxElapsed, isFetching]);
+
+  if (shouldShowShellSplash) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <img
+          src="/favicon-full.svg"
+          alt="Owe It"
+          className="block h-[18.2rem] w-[18.2rem] sm:h-[20.8rem] sm:w-[20.8rem] object-contain animate-pop-in"
+        />
+      </div>
+    );
+  }
+
+  return (
     <div className="max-w-lg mx-auto relative">
       <Routes>
         <Route path="/" element={<Dashboard />} />
@@ -86,8 +179,17 @@ function AppRoutes() {
         <Route path="/auth" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
-      <BottomNav onCreateGoal={() => setCreateOpen(true)} />
+      <BottomNav
+        fabTutorialSpotlight={fabSpotlight}
+        highlightTab={highlightNavTab}
+        tabTourBlocking={Boolean(highlightNavTab)}
+        onCreateGoal={() => {
+          if (fabSpotlight) onFabPhaseCreateOpened();
+          else setCreateOpen(true);
+        }}
+      />
       <CreateGoalSheet open={createOpen} onClose={() => setCreateOpen(false)} />
+      <AppTutorialChrome onCloseCreateSheet={() => setCreateOpen(false)} />
       <JudgeRequestToastHost />
       <JudgeGoalCreatedNoticeHost />
       <DeadlineReminderToastHost />

@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { cn } from "@/lib/utils";
+import { useAppTutorial } from "@/hooks/useAppTutorial";
 import {
   Popover,
   PopoverBody,
@@ -8,7 +10,6 @@ import {
   PopoverHeader,
   PopoverTitle,
   PopoverTrigger,
-  PopoverFooter,
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Copy, History, MessageSquare, Settings, User } from "lucide-react";
@@ -16,23 +17,34 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { PopoverClose } from "@/components/ui/popover";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  PROFILE_AVATAR_UPDATED_EVENT,
+  readProfileAvatarFromStorage,
+  writeProfileAvatarToStorage,
+} from "@/lib/profileAvatarEvents";
 
 export default function UserProfilePopover() {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
+  const { profileMenuTutorial } = useAppTutorial();
   const [friendCode, setFriendCode] = useState<string | null>(null);
   const [friendCodeDbReady, setFriendCodeDbReady] = useState<boolean>(true);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
 
   const displayName =
     user?.displayName || (user?.email ? user.email.split("@")[0] : "Guest");
   const email = user?.email || "guest@example.com";
   const initial = (displayName || email).trim().charAt(0).toUpperCase();
 
-  const avatarSrc =
-    "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=80&h=80&q=80";
+  const displayAvatarSrc =
+    (avatarUrl ?? readProfileAvatarFromStorage(user?.id))?.trim() || undefined;
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setAvatarUrl(null);
+      return;
+    }
 
     const generateLocalFriendCode = () => {
       let s = "";
@@ -50,7 +62,7 @@ export default function UserProfilePopover() {
     (async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("friend_code")
+        .select("friend_code, avatar_url")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -61,7 +73,11 @@ export default function UserProfilePopover() {
         }
         return;
       }
-      const existing = (data as any)?.friend_code ?? null;
+      const row = data as { friend_code?: string | null; avatar_url?: string | null } | null;
+      const nextAvatar = row?.avatar_url?.trim() || null;
+      setAvatarUrl(nextAvatar);
+      writeProfileAvatarToStorage(user.id, nextAvatar);
+      const existing = row?.friend_code ?? null;
       if (existing) {
         setFriendCode(existing);
         window.localStorage.setItem(localKey, existing);
@@ -97,22 +113,73 @@ export default function UserProfilePopover() {
     })();
   }, [user?.id]);
 
+  useEffect(() => {
+    const refreshAvatar = () => {
+      if (!user?.id) return;
+      void supabase
+        .from("profiles")
+        .select("avatar_url")
+        .eq("id", user.id)
+        .maybeSingle()
+        .then(({ data, error }) => {
+          if (error || !user?.id) return;
+          const row = data as { avatar_url?: string | null } | null;
+          const next = row?.avatar_url?.trim() || null;
+          setAvatarUrl(next);
+          writeProfileAvatarToStorage(user.id, next);
+        });
+    };
+    window.addEventListener(PROFILE_AVATAR_UPDATED_EVENT, refreshAvatar);
+    return () => window.removeEventListener(PROFILE_AVATAR_UPDATED_EVENT, refreshAvatar);
+  }, [user?.id]);
+
+  const popoverOpen = profileMenuTutorial || open;
+
   return (
-    <Popover>
+    <Popover
+      open={popoverOpen}
+      onOpenChange={(next) => {
+        if (profileMenuTutorial && !next) return;
+        setOpen(next);
+      }}
+    >
       <PopoverTrigger asChild>
-        <Button variant="ghost" className="h-10 w-10 rounded-full p-0">
-          <Avatar className="h-8 w-8">
-            <AvatarImage src={avatarSrc} alt={displayName} />
-            <AvatarFallback>{initial}</AvatarFallback>
+        <Button
+          variant="ghost"
+          className={cn(
+            "h-[42px] w-[42px] shrink-0 rounded-full p-0 overflow-hidden",
+            profileMenuTutorial && "relative z-[47]",
+            profileMenuTutorial && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+          )}
+        >
+          <Avatar className="h-[42px] w-[42px] rounded-full">
+            <AvatarImage
+              src={displayAvatarSrc}
+              alt={displayName}
+              className="object-cover"
+              loading="eager"
+              decoding="async"
+            />
+            <AvatarFallback className="rounded-full text-xs font-semibold" delayMs={400}>
+              {initial}
+            </AvatarFallback>
           </Avatar>
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-62">
         <PopoverHeader>
           <div className="flex items-center space-x-3">
-            <Avatar className="h-10 w-10">
-              <AvatarImage src={avatarSrc} alt={displayName} />
-              <AvatarFallback>{initial}</AvatarFallback>
+            <Avatar className="h-14 w-14 rounded-full">
+              <AvatarImage
+                src={displayAvatarSrc}
+                alt={displayName}
+                className="object-cover"
+                loading="eager"
+                decoding="async"
+              />
+              <AvatarFallback className="rounded-full" delayMs={400}>
+                {initial}
+              </AvatarFallback>
             </Avatar>
             <div>
               <PopoverTitle>{displayName}</PopoverTitle>
@@ -204,18 +271,6 @@ export default function UserProfilePopover() {
             </Button>
           </PopoverClose>
         </PopoverBody>
-        <PopoverFooter>
-          <Button
-            variant="outline"
-            className="w-full bg-transparent"
-            size="sm"
-            onClick={() => {
-              void signOut();
-            }}
-          >
-            Sign Out
-          </Button>
-        </PopoverFooter>
       </PopoverContent>
     </Popover>
   );

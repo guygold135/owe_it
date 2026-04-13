@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { FriendCard } from '@/components/FriendCard';
@@ -8,7 +8,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { useFriendsData } from '@/hooks/useFriendsData';
 import { queryKeys } from '@/lib/queryKeys';
 import type { ProfileLite } from '@/lib/fetchers/tabData';
-import { Check, Search, X } from 'lucide-react';
+import { Check, Copy, Search, Share2, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { FriendsPageSkeleton } from '@/components/PageSkeletons';
 
 export default function Friends() {
@@ -20,6 +21,49 @@ export default function Friends() {
   const [searchResult, setSearchResult] = useState<ProfileLite | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [myFriendCode, setMyFriendCode] = useState<string | null>(null);
+  const [friendCodeDbReady, setFriendCodeDbReady] = useState(true);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setMyFriendCode(null);
+      return;
+    }
+    setFriendCodeDbReady(true);
+    const localKey = `friend_code_${user.id}`;
+    const cached = window.localStorage.getItem(localKey);
+    if (cached && /^\d{11}$/.test(cached)) {
+      setMyFriendCode(cached);
+    }
+
+    let cancelled = false;
+    void supabase
+      .from('profiles')
+      .select('friend_code')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          const msg = String((error as { message?: string })?.message ?? '').toLowerCase();
+          if (
+            msg.includes('friend_code') &&
+            (msg.includes('column') || msg.includes('schema') || msg.includes('does not exist'))
+          ) {
+            setFriendCodeDbReady(false);
+          }
+          return;
+        }
+        const code = (data as { friend_code?: string | null } | null)?.friend_code;
+        const valid = typeof code === 'string' && /^\d{11}$/.test(code) ? code : null;
+        setMyFriendCode(valid);
+        if (valid) window.localStorage.setItem(localKey, valid);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const invalidateFriends = () => {
     if (user?.id) {
@@ -29,6 +73,40 @@ export default function Friends() {
   };
 
   const normalizedSearchCode = useMemo(() => searchCode.replace(/\D/g, '').slice(0, 11), [searchCode]);
+  const inviteUrl = useMemo(() => `${window.location.origin}/auth`, []);
+
+  const shareInviteLink = async () => {
+    const text = myFriendCode
+      ? `Join me on Owe It: ${inviteUrl}\nMy Friend ID: ${myFriendCode}`
+      : `Join me on Owe It: ${inviteUrl}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'Join me on Owe It',
+          text,
+          url: inviteUrl,
+        });
+        return;
+      }
+    } catch (error) {
+      // User cancelling the native share sheet is expected; only log unexpected errors.
+      const msg = String((error as { message?: string })?.message ?? '').toLowerCase();
+      if (msg.includes('abort') || msg.includes('cancel')) return;
+      console.error('Invite share error', error);
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        toast.success('Invite link copied.');
+        return;
+      }
+    } catch (error) {
+      console.error('Invite clipboard error', error);
+    }
+
+    toast.error('Could not share the invite link.');
+  };
 
   const doSearch = async () => {
     setSearchError(null);
@@ -128,6 +206,81 @@ export default function Friends() {
           <FriendsPageSkeleton />
         ) : (
           <>
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.02 }}
+          className="p-5 rounded-[20px] bg-card border border-border"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground">Your account ID</p>
+              <p className="mt-2 font-display font-semibold text-foreground tabular-nums text-xl tracking-wide break-all">
+                {friendCodeDbReady ? (myFriendCode ?? '…') : 'Unavailable'}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={!friendCodeDbReady || !myFriendCode}
+              className="shrink-0 inline-flex items-center justify-center rounded-xl p-2.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              aria-label="Copy account ID"
+              onClick={async () => {
+                if (!myFriendCode) return;
+                try {
+                  if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(myFriendCode);
+                    toast.success('Account ID copied.');
+                    return;
+                  }
+                } catch (e) {
+                  console.error('Clipboard error', e);
+                }
+                try {
+                  const ta = document.createElement('textarea');
+                  ta.value = myFriendCode;
+                  ta.style.position = 'fixed';
+                  ta.style.left = '-9999px';
+                  document.body.appendChild(ta);
+                  ta.focus();
+                  ta.select();
+                  document.execCommand('copy');
+                  document.body.removeChild(ta);
+                  toast.success('Account ID copied.');
+                } catch (e) {
+                  console.error('Clipboard fallback error', e);
+                  toast.error('Could not copy.');
+                }
+              }}
+            >
+              <Copy className="h-4 w-4" />
+            </button>
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.04 }}
+          className="p-5 rounded-[20px] bg-card border border-border"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <h4 className="font-display font-semibold text-foreground">Invite by link</h4>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Send a signup link so your friends can create an Owe It account.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void shareInviteLink()}
+              className="h-11 px-4 rounded-2xl bg-primary text-primary-foreground font-display font-bold inline-flex items-center gap-2 shrink-0"
+            >
+              <Share2 className="w-4 h-4" />
+              Share link
+            </button>
+          </div>
+        </motion.div>
+
         {/* Add a friend by Friend ID */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}

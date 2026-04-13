@@ -1,12 +1,22 @@
 import { motion } from 'framer-motion';
 import { Goal } from '@/lib/types';
 import { useCountdown } from '@/hooks/useCountdown';
-import { Lock, Eye, User } from 'lucide-react';
+import { Lock, Trash2, User } from 'lucide-react';
 import { formatStakeAmount } from '@/lib/currency';
 
 const springTransition = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
-export function StakeCard({ goal, onClick }: { goal: Goal; onClick?: () => void }) {
+export function StakeCard({
+  goal,
+  onClick,
+  tutorialCreated,
+  onDeleteTutorialGoal,
+}: {
+  goal: Goal;
+  onClick?: () => void;
+  tutorialCreated?: boolean;
+  onDeleteTutorialGoal?: (goalId: string) => void;
+}) {
   const { days, hours, minutes, seconds, isUrgent, isExpired, urgency } = useCountdown(goal.deadline);
 
   const borderClass = goal.status === 'active'
@@ -68,6 +78,26 @@ export function StakeCard({ goal, onClick }: { goal: Goal; onClick?: () => void 
           <div className={`h-2 w-2 rounded-full ${dotColor} ${goal.status === 'active' ? 'animate-pulse' : ''}`} />
         </div>
       </div>
+      {tutorialCreated ? (
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <span className="inline-flex rounded-full border border-warning/40 bg-warning/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning">
+            Tutorial goal
+          </span>
+          {onDeleteTutorialGoal ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteTutorialGoal(goal.id);
+              }}
+              className="inline-flex items-center gap-1 rounded-lg border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs font-semibold text-destructive hover:bg-destructive/20"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Title */}
       <h3 className="text-xl font-display font-bold mt-3 tracking-tight text-foreground text-balance">

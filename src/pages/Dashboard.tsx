@@ -13,7 +13,7 @@ import UserProfilePopover from '@/components/UserProfilePopover';
 import { DashboardStatsSkeleton, GoalsListSkeleton } from '@/components/PageSkeletons';
 import { convertStakeAmount, formatStakeAmount } from '@/lib/currency';
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
-import { isTutorialCreatedGoal, unmarkTutorialCreatedGoal } from '@/lib/appTutorial';
+import { unmarkTutorialCreatedGoal } from '@/lib/appTutorial';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -58,10 +58,6 @@ export default function Dashboard() {
       }),
     [contractGoals],
   );
-  const tutorialGoalIds = useMemo(() => {
-    return new Set(goals.filter((g) => isTutorialCreatedGoal(g.id)).map((g) => g.id));
-  }, [goals]);
-
   return (
     <div className="min-h-screen bg-background pb-28">
       {/* Header */}
@@ -153,7 +149,7 @@ export default function Dashboard() {
                 <StakeCard
                   key={goal.id}
                   goal={goal}
-                  tutorialCreated={tutorialGoalIds.has(goal.id)}
+                  tutorialCreated={Boolean(goal.createdDuringAppTutorial)}
                   onDeleteTutorialGoal={(goalId) => setTutorialDeleteGoalId(goalId)}
                 />
               ))}

@@ -14,7 +14,6 @@ import {
   APP_TUTORIAL_SHEET_STEP_TO_PHASE,
   type AppTutorialPhase,
   isAppTutorialSheetPhase,
-  markGoalAsTutorialCreated,
 } from '@/lib/appTutorial';
 
 export type { AppTutorialPhase };
@@ -203,8 +202,7 @@ export function AppTutorialProvider({
     setCreateHadPaidStake(hasPaidStake);
   }, [phase]);
 
-  const onGoalCreatedInTutorial = useCallback((goalId?: string | null) => {
-    if (goalId) markGoalAsTutorialCreated(goalId);
+  const onGoalCreatedInTutorial = useCallback((_goalId?: string | null) => {
     setPhase('tab_goals');
     setCreateHadPaidStake(null);
     navigate('/');

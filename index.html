@@ -6,6 +6,20 @@
     <title>Owe It</title>
     <meta name="description" content="Owe It - Accountability and achievements app." />
     <meta name="author" content="Owe It" />
+    <!-- Same bg as app (--background) so there is no white flash before React/CSS loads -->
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: hsl(220 20% 14%);
+      }
+      #root {
+        min-height: 100%;
+        background: hsl(220 20% 14%);
+      }
+    </style>
+    <link rel="preload" as="image" href="/app-logo.svg?v=__DEPLOY_REF__" fetchpriority="high" />
     <!-- favicon.svg + PNGs: same mark as app loading screen (see scripts/build_app_logo.py) -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=__DEPLOY_REF__" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=__DEPLOY_REF__" />

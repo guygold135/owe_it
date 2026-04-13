@@ -13,6 +13,8 @@ export interface Goal {
   status: 'active' | 'completed' | 'failed';
   judge: Judge;
   isPrivate: boolean;
+  /** From DB; true for goals created during the app tutorial (same on all devices for this account). */
+  createdDuringAppTutorial?: boolean;
   proof?: string;
 }
 

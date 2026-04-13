@@ -170,6 +170,42 @@
     animation: pulse-border-warning 2s ease-in-out infinite;
   }
 
+  /** Splash / auth bootstrap: seamless loading indicator (no snap-back pulse). */
+  .loading-track {
+    width: 9rem;
+    height: 0.32rem;
+    border-radius: 999px;
+    background: hsl(var(--muted) / 0.55);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .loading-bar {
+    position: absolute;
+    inset: 0;
+    width: 40%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, hsl(var(--primary) / 0.35), hsl(var(--primary) / 0.95));
+    animation: loading-slide 1.15s linear infinite;
+  }
+
+  @keyframes loading-slide {
+    from {
+      transform: translateX(-120%);
+    }
+    to {
+      transform: translateX(300%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .loading-bar {
+      animation: none;
+      width: 65%;
+      transform: translateX(18%);
+    }
+  }
+
   /* Hide number input spinners for a cleaner stake input */
   input[type="number"]::-webkit-inner-spin-button,
   input[type="number"]::-webkit-outer-spin-button {

@@ -823,6 +823,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
         status: 'active',
         judge: judge!,
         isPrivate,
+        ...(tutorialCreateFlowActive ? { createdDuringAppTutorial: true } : {}),
       };
       createdGoalIdRef.current = await addGoal(newGoal);
       return;

@@ -42,22 +42,38 @@ const queryClient = new QueryClient({
 
 function BootstrapLogoScreen() {
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center">
+    <div
+      className="min-h-screen bg-background flex flex-col items-center justify-center gap-4 px-6"
+      aria-busy="true"
+      aria-live="polite"
+    >
       <img
         src={APP_LOGO_SRC}
-        alt="Owe It"
-        className="block h-[18.2rem] w-[18.2rem] sm:h-[20.8rem] sm:w-[20.8rem] object-contain animate-pop-in"
-        decoding="async"
+        alt=""
+        aria-hidden
+        className="block h-36 w-36 sm:h-44 sm:w-44 object-contain"
+        decoding="sync"
         fetchPriority="high"
       />
+      <div className="loading-track" aria-hidden>
+        <div className="loading-bar" />
+      </div>
+      <p className="text-xs font-medium tracking-widest text-muted-foreground/60 uppercase">
+        Loading
+      </p>
     </div>
   );
 }
 
+const SESSION_SPLASH_KEY = 'owe_it_session_logo_splash_seen_v1';
+
 function AppRoutes() {
   const { user, loading, passwordRecoveryPending } = useAuth();
   const [createOpen, setCreateOpen] = useState(false);
-  const [showSessionSplash, setShowSessionSplash] = useState(false);
+  /** First visit in this tab: true immediately so we never flash another UI before the logo (see timers in effect). */
+  const [showSessionSplash, setShowSessionSplash] = useState(() =>
+    typeof window !== 'undefined' ? sessionStorage.getItem(SESSION_SPLASH_KEY) !== '1' : false,
+  );
   const [splashMinElapsed, setSplashMinElapsed] = useState(false);
   const [splashMaxElapsed, setSplashMaxElapsed] = useState(false);
   useAbandonStaleJudgeRequestsOnBootstrap(user?.id);
@@ -65,17 +81,15 @@ function AppRoutes() {
   const appReadyForRouting = !loading && !(passwordRecoveryPending && !user);
 
   useEffect(() => {
-    const key = 'owe_it_session_logo_splash_seen_v1';
-    if (window.sessionStorage.getItem(key) === '1') return;
-    window.sessionStorage.setItem(key, '1');
-    setShowSessionSplash(true);
+    if (!showSessionSplash) return;
+    sessionStorage.setItem(SESSION_SPLASH_KEY, '1');
     const minTimer = window.setTimeout(() => setSplashMinElapsed(true), 1000);
     const maxTimer = window.setTimeout(() => setSplashMaxElapsed(true), 3000);
     return () => {
       window.clearTimeout(minTimer);
       window.clearTimeout(maxTimer);
     };
-  }, []);
+  }, [showSessionSplash]);
 
   const shouldShowLogoSplash = useMemo(() => {
     if (!showSessionSplash) return false;
@@ -93,11 +107,7 @@ function AppRoutes() {
   }
 
   if (passwordRecoveryPending && !user) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-      </div>
-    );
+    return <BootstrapLogoScreen />;
   }
 
   if (!user) {
@@ -123,6 +133,8 @@ function AppRoutes() {
   );
 }
 
+const SHELL_SPLASH_KEY = 'owe_it_session_main_shell_logo_splash_seen_v1';
+
 function LoggedInAppShell({
   createOpen,
   setCreateOpen,
@@ -132,22 +144,22 @@ function LoggedInAppShell({
 }) {
   const { fabSpotlight, onFabPhaseCreateOpened, highlightNavTab } = useAppTutorial();
   const isFetching = useIsFetching();
-  const [showShellSplash, setShowShellSplash] = useState(false);
+  const [showShellSplash, setShowShellSplash] = useState(() =>
+    typeof window !== 'undefined' ? sessionStorage.getItem(SHELL_SPLASH_KEY) !== '1' : false,
+  );
   const [shellSplashMinElapsed, setShellSplashMinElapsed] = useState(false);
   const [shellSplashMaxElapsed, setShellSplashMaxElapsed] = useState(false);
 
   useEffect(() => {
-    const key = 'owe_it_session_main_shell_logo_splash_seen_v1';
-    if (window.sessionStorage.getItem(key) === '1') return;
-    window.sessionStorage.setItem(key, '1');
-    setShowShellSplash(true);
+    if (!showShellSplash) return;
+    sessionStorage.setItem(SHELL_SPLASH_KEY, '1');
     const minTimer = window.setTimeout(() => setShellSplashMinElapsed(true), 1000);
     const maxTimer = window.setTimeout(() => setShellSplashMaxElapsed(true), 3000);
     return () => {
       window.clearTimeout(minTimer);
       window.clearTimeout(maxTimer);
     };
-  }, []);
+  }, [showShellSplash]);
 
   const shouldShowShellSplash = useMemo(() => {
     if (!showShellSplash) return false;

@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { queryKeys } from '@/lib/queryKeys';
 import { fetchUserGoals } from '@/lib/fetchers/tabData';
+import { isTutorialCreatedGoal, unmarkTutorialCreatedGoal } from '@/lib/appTutorial';
 
 export function useGoals() {
   const { user, loading: authLoading } = useAuth();
@@ -45,6 +46,25 @@ export function useGoals() {
     };
   }, [userId, queryClient]);
 
+  /** One-time migration: device-local tutorial IDs → DB so all sessions show the tutorial badge/delete affordance. */
+  useEffect(() => {
+    if (!userId || authLoading || query.isPending) return;
+    const list = query.data ?? [];
+    const pending = list.filter((g) => !g.createdDuringAppTutorial && isTutorialCreatedGoal(g.id));
+    if (pending.length === 0) return;
+    void (async () => {
+      for (const g of pending) {
+        const { error } = await supabase
+          .from('goals')
+          .update({ created_during_app_tutorial: true })
+          .eq('id', g.id)
+          .eq('user_id', userId);
+        if (!error) unmarkTutorialCreatedGoal(g.id);
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.goals(userId) });
+    })();
+  }, [userId, authLoading, query.isPending, query.data, queryClient]);
+
   const loadGoals = useCallback(async () => {
     if (!userId) return;
     void queryClient.invalidateQueries({ queryKey: queryKeys.goals(userId) });
@@ -57,7 +77,7 @@ export function useGoals() {
       throw new Error('No user is signed in.');
     }
 
-    const buildPayload = (opts?: { includeCurrency?: boolean; includeCharity?: boolean }) => ({
+    const buildPayload = (opts?: { includeCurrency?: boolean; includeCharity?: boolean; includeTutorialFlag?: boolean }) => ({
       user_id: user.id,
       title: goal.title,
       description: goal.description,
@@ -69,6 +89,7 @@ export function useGoals() {
       judge_name: goal.judge?.isSelf ? null : goal.judge?.name,
       judge_user_id: goal.judge?.isSelf ? user.id : goal.judge?.id,
       is_private: goal.isPrivate,
+      ...(opts?.includeTutorialFlag === false ? {} : goal.createdDuringAppTutorial ? { created_during_app_tutorial: true } : {}),
     });
 
     const insertWithCurrency = await supabase
@@ -93,6 +114,14 @@ export function useGoals() {
         const retry = await supabase
           .from('goals')
           .insert(buildPayload({ includeCurrency: false, includeCharity: true }))
+          .select('id')
+          .maybeSingle();
+        error = retry.error;
+        createdGoalId = (retry.data as { id?: string } | null)?.id ?? createdGoalId;
+      } else if (message.includes('created_during_app_tutorial')) {
+        const retry = await supabase
+          .from('goals')
+          .insert(buildPayload({ includeCurrency: true, includeCharity: true, includeTutorialFlag: false }))
           .select('id')
           .maybeSingle();
         error = retry.error;

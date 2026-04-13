@@ -27,6 +27,7 @@ type GoalRow = {
   judge_name: string | null;
   judge_user_id?: string | null;
   is_private: boolean;
+  created_during_app_tutorial?: boolean | null;
 };
 
 function mapRowToGoal(row: GoalRow, avatarById: Map<string, string | null>): Goal {
@@ -55,13 +56,15 @@ function mapRowToGoal(row: GoalRow, avatarById: Map<string, string | null>): Goa
     status: row.status,
     judge,
     isPrivate: row.is_private,
+    createdDuringAppTutorial: Boolean(row.created_during_app_tutorial),
   };
 }
 
 export async function fetchUserGoals(userId: string): Promise<Goal[]> {
   const fieldsWithCurrency =
-    'id,title,description,stake,stake_currency,charity_id,deadline,created_at,resolved_at,status,judge_name,is_private,user_id,judge_user_id';
-  const fallbackFields = 'id,title,description,stake,deadline,created_at,resolved_at,status,judge_name,is_private,user_id,judge_user_id';
+    'id,title,description,stake,stake_currency,charity_id,deadline,created_at,resolved_at,status,judge_name,is_private,user_id,judge_user_id,created_during_app_tutorial';
+  const fallbackFields =
+    'id,title,description,stake,deadline,created_at,resolved_at,status,judge_name,is_private,user_id,judge_user_id,created_during_app_tutorial';
 
   let { data, error } = await supabase
     .from('goals')

@@ -76,14 +76,15 @@ export default function Friends() {
   const inviteUrl = useMemo(() => `${window.location.origin}/auth`, []);
 
   const shareInviteLink = async () => {
-    const text = myFriendCode
+    const nativeShareText = myFriendCode ? `Join me on Owe It\nMy Friend ID: ${myFriendCode}` : 'Join me on Owe It';
+    const fallbackText = myFriendCode
       ? `Join me on Owe It: ${inviteUrl}\nMy Friend ID: ${myFriendCode}`
       : `Join me on Owe It: ${inviteUrl}`;
     try {
       if (navigator.share) {
         await navigator.share({
           title: 'Join me on Owe It',
-          text,
+          text: nativeShareText,
           url: inviteUrl,
         });
         return;
@@ -97,7 +98,7 @@ export default function Friends() {
 
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(fallbackText);
         toast.success('Invite link copied.');
         return;
       }

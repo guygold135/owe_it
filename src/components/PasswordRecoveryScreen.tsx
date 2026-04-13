@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+import { APP_LOGO_SRC } from '@/lib/brandAssets';
 
 export function PasswordRecoveryScreen() {
   const { updatePassword } = useAuth();
@@ -42,7 +43,7 @@ export function PasswordRecoveryScreen() {
         className="text-center mb-12"
       >
         <div className="w-24 h-24 mx-auto mb-6 flex items-center justify-center">
-          <img src="/app-logo.svg?v=8" alt="" className="h-full w-full object-contain drop-shadow-sm" width={96} height={96} decoding="async" />
+          <img src={APP_LOGO_SRC} alt="" className="h-full w-full object-contain drop-shadow-sm" width={96} height={96} decoding="async" />
         </div>
         <h1 className="text-2xl font-display font-extrabold text-foreground tracking-tight">
           Set a new password

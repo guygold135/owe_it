@@ -27,6 +27,7 @@ import { JudgeGoalCreatedNoticeHost } from "@/components/JudgeGoalCreatedNoticeH
 import { DeadlineReminderToastHost } from "@/components/DeadlineReminderToastHost";
 import { AppVersionQuote } from "@/components/AppVersionQuote";
 import { PasswordRecoveryScreen } from "@/components/PasswordRecoveryScreen";
+import { APP_LOGO_SRC } from "@/lib/brandAssets";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,9 +39,6 @@ const queryClient = new QueryClient({
     },
   },
 });
-
-/** Cache-bust when the SVG asset changes; cropped viewBox so the mark + wordmark fill the frame. */
-const APP_LOGO_SRC = '/app-logo.svg?v=8';
 
 function BootstrapLogoScreen() {
   return (

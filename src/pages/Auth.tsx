@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { consumeAuthRedirectError } from '@/lib/sessionBootstrap';
+import { APP_LOGO_SRC } from '@/lib/brandAssets';
 
 export default function Auth() {
   const { signIn, signUp, signInWithOAuth, sendPasswordResetEmail, resendSignupConfirmation } =
@@ -126,7 +127,7 @@ export default function Auth() {
         className="text-center mb-12"
       >
         <div className="w-28 h-28 mx-auto mb-6 flex items-center justify-center">
-          <img src="/app-logo.svg?v=8" alt="" className="h-full w-full object-contain drop-shadow-sm" width={112} height={112} decoding="async" />
+          <img src={APP_LOGO_SRC} alt="" className="h-full w-full object-contain drop-shadow-sm" width={112} height={112} decoding="async" />
         </div>
         <h1 className="text-4xl font-display font-extrabold text-foreground tracking-tight">
           Owe It

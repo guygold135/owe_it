@@ -17,6 +17,16 @@ const gitShaRaw =
   process.env.VITE_GIT_SHA ??
   "";
 const gitShaShort = gitShaRaw ? gitShaRaw.slice(0, 7) : "";
+const htmlDeployRef = gitShaShort || pkg.version;
+
+function htmlCacheBustPlugin() {
+  return {
+    name: "html-deploy-cache-bust",
+    transformIndexHtml(html: string) {
+      return html.replaceAll("__DEPLOY_REF__", htmlDeployRef);
+    },
+  };
+}
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -30,7 +40,11 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
   },
-  plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+  plugins: [
+    react(),
+    htmlCacheBustPlugin(),
+    mode === "development" && componentTagger(),
+  ].filter(Boolean),
   build: {
     // Keep the default, but make it explicit for Capacitor's `webDir`.
     outDir: "dist",

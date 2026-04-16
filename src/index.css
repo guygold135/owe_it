@@ -158,6 +158,24 @@
     }
   }
 
+  @keyframes parallax_fg {
+    0% {
+      background-position: 2765px 100%;
+    }
+    100% {
+      background-position: 550px 100%;
+    }
+  }
+
+  @keyframes parallax_bike {
+    0% {
+      background-position: -300px 100%;
+    }
+    100% {
+      background-position: 2000px 100%;
+    }
+  }
+
   .animate-pop-in {
     animation: pop-in 0.4s ease-out forwards;
   }
@@ -168,6 +186,91 @@
 
   .animate-pulse-border-warning {
     animation: pulse-border-warning 2s ease-in-out infinite;
+  }
+
+  .hero-container {
+    position: absolute;
+    inset: -2px 0 0 0;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at top, hsl(var(--primary) / 0.16), transparent 36%),
+      linear-gradient(180deg, hsl(220 20% 12% / 0.55) 0%, hsl(220 20% 10% / 0.88) 58%, hsl(var(--primary) / 0.26) 100%);
+    isolation: isolate;
+  }
+
+  .hero-container::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(180deg, transparent 0%, hsl(var(--background) / 0.18) 52%, hsl(var(--primary) / 0.34) 100%),
+      radial-gradient(circle at 50% 18%, hsl(var(--primary) / 0.14), transparent 30%);
+    z-index: 6;
+    pointer-events: none;
+  }
+
+  .parallax-layer {
+    position: absolute;
+    inset: 0 0 0 0;
+    height: auto;
+    background-position: 0 100%;
+    background-repeat: repeat-x;
+    animation-name: parallax_fg;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    filter: hue-rotate(88deg) saturate(0.22) contrast(1.18);
+    transform: translateZ(0);
+    pointer-events: none;
+  }
+
+  .bike-1,
+  .bike-2 {
+    left: -5%;
+    right: -5%;
+    top: auto;
+    height: 150px;
+    filter: hue-rotate(70deg) saturate(0.2) brightness(0.18) contrast(1.2);
+  }
+
+  .layer-6 { filter: hue-rotate(88deg) saturate(0.24) brightness(0.34) contrast(1.05); }
+  .layer-5 { filter: hue-rotate(88deg) saturate(0.24) brightness(0.3) contrast(1.08); }
+  .layer-4 { filter: hue-rotate(88deg) saturate(0.23) brightness(0.26) contrast(1.1); }
+  .layer-3 { filter: hue-rotate(88deg) saturate(0.22) brightness(0.22) contrast(1.14); }
+  .layer-2 { filter: hue-rotate(88deg) saturate(0.21) brightness(0.18) contrast(1.18); }
+  .layer-1 { filter: hue-rotate(88deg) saturate(0.2) brightness(0.14) contrast(1.22); }
+
+  .layer-1,
+  .layer-2,
+  .layer-3,
+  .layer-4,
+  .layer-5,
+  .layer-6 {
+    top: 0;
+  }
+
+  .hero-content {
+    position: relative;
+    z-index: 7;
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .hero-title {
+    font-family: 'Schibsted Grotesk', sans-serif;
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: hsl(var(--foreground));
+  }
+
+  .hero-subtitle {
+    margin-top: 0.5rem;
+    font-size: 0.95rem;
+    color: hsl(var(--muted-foreground));
   }
 
   /** Splash / auth bootstrap: seamless loading indicator (no snap-back pulse). */
@@ -203,6 +306,10 @@
       animation: none;
       width: 65%;
       transform: translateX(18%);
+    }
+
+    .parallax-layer {
+      animation: none !important;
     }
   }
 

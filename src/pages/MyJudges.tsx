@@ -36,9 +36,11 @@ export default function MyJudges() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="text-3xl font-display font-extrabold tracking-tight text-foreground"
+            className="mt-2 pr-2 text-xl font-display font-extrabold leading-snug tracking-tight text-balance text-foreground"
           >
-            Goals I judge
+            Be the judge they can trust.
+            <br />
+            Honest judgment builds real change.
           </motion.h1>
         </div>
         <UserProfilePopover />

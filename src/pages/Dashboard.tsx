@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useGoals } from '@/hooks/useGoals';
 import { useDeadlineReminderTriggers } from '@/hooks/useDeadlineReminderTriggers';
@@ -8,10 +8,11 @@ import { useDashboardVisibleContracts } from '@/hooks/useDashboardVisibleContrac
 import { useResolvedGoalSpotlight } from '@/hooks/useResolvedGoalSpotlight';
 import { StakeCard } from '@/components/StakeCard';
 import { ResolvedGoalSpotlight } from '@/components/ResolvedGoalSpotlight';
-import { DollarSign, Trophy } from 'lucide-react';
+import { Trophy } from 'lucide-react';
 import UserProfilePopover from '@/components/UserProfilePopover';
 import { DashboardStatsSkeleton, GoalsListSkeleton } from '@/components/PageSkeletons';
 import { convertStakeAmount, formatStakeAmount } from '@/lib/currency';
+import { convertStakeAmountLive } from '@/lib/exchangeRates';
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
 import { unmarkTutorialCreatedGoal } from '@/lib/appTutorial';
 import {
@@ -27,9 +28,13 @@ import {
 
 export default function Dashboard() {
   const { goals, loading, loadGoals, deleteGoal } = useGoals();
-  const { currency: selectedCurrency } = useStakeCurrencyPreference();
+  const { currency: selectedCurrency } = useStakeCurrencyPreference({ listenForChanges: false });
   useAutoExpireGoals(goals, loadGoals, { enabled: true, loading });
-  const activeGoals = goals.filter(g => g.status === 'active');
+  const activeGoals = useMemo(() => goals.filter(g => g.status === 'active'), [goals]);
+  const activeGoalsFxKey = useMemo(
+    () => activeGoals.map((g) => `${g.id}:${g.stake}:${g.stakeCurrency}`).join('|'),
+    [activeGoals],
+  );
   useDeadlineReminderTriggers(activeGoals);
   const deadlineLocalToastGoals = useMemo(
     () =>
@@ -43,20 +48,51 @@ export default function Dashboard() {
     (sum, g) => sum + convertStakeAmount(g.stake, g.stakeCurrency, selectedCurrency),
     0,
   );
+  const [liveTotalAtRisk, setLiveTotalAtRisk] = useState(totalAtRisk);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (activeGoals.length === 0) {
+      setLiveTotalAtRisk(0);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      try {
+        const converted = await Promise.all(
+          activeGoals.map((g) => convertStakeAmountLive(g.stake, g.stakeCurrency, selectedCurrency)),
+        );
+        if (!cancelled) {
+          setLiveTotalAtRisk(converted.reduce((sum, value) => sum + value, 0));
+        }
+      } catch {
+        if (!cancelled) setLiveTotalAtRisk(totalAtRisk);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeGoals, activeGoalsFxKey, selectedCurrency, totalAtRisk]);
   const watchingJudges = activeGoals.filter(g => !g.judge.isSelf).length;
   const completed = goals.filter(g => g.status === 'completed').length;
   const spotlightGoals = useResolvedGoalSpotlight(goals);
   const contractGoals = useDashboardVisibleContracts(goals);
+  const spotlightGoalIds = useMemo(() => new Set(spotlightGoals.map((g) => g.id)), [spotlightGoals]);
   const [tutorialDeleteGoalId, setTutorialDeleteGoalId] = useState<string | null>(null);
   const sortedContractGoals = useMemo(
     () =>
-      [...contractGoals].sort((a, b) => {
+      [...contractGoals]
+        .filter((g) => !spotlightGoalIds.has(g.id))
+        .sort((a, b) => {
         const aActive = a.status === 'active' ? 1 : 0;
         const bActive = b.status === 'active' ? 1 : 0;
         if (bActive !== aActive) return bActive - aActive;
         return (b.deadline?.getTime() ?? 0) - (a.deadline?.getTime() ?? 0);
       }),
-    [contractGoals],
+    [contractGoals, spotlightGoalIds],
   );
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -67,9 +103,11 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="text-3xl font-display font-extrabold text-foreground mt-2 tracking-tight"
+            className="text-xl font-display font-extrabold text-foreground mt-2 tracking-tight leading-snug text-balance pr-2"
           >
-            Put your money where<br />your ambition is.
+            Win for yourself or give for a cause.
+            <br />
+            Either way, something good happens.
           </motion.h1>
         </div>
         <UserProfilePopover />
@@ -94,10 +132,25 @@ export default function Dashboard() {
             <div className="grid grid-cols-3 gap-4">
               <div className="text-center">
                 <div className="w-10 h-10 mx-auto rounded-2xl bg-primary/10 flex items-center justify-center mb-2">
-                  <DollarSign className="w-5 h-5 text-primary" />
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="icon icon-tabler icons-tabler-outline icon-tabler-moneybag w-5 h-5 text-primary"
+                  >
+                    <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                    <path d="M9.5 3h5a1.5 1.5 0 0 1 1.5 1.5a3.5 3.5 0 0 1 -3.5 3.5h-1a3.5 3.5 0 0 1 -3.5 -3.5a1.5 1.5 0 0 1 1.5 -1.5" />
+                    <path d="M4 17v-1a8 8 0 1 1 16 0v1a4 4 0 0 1 -4 4h-8a4 4 0 0 1 -4 -4" />
+                  </svg>
                 </div>
                 <p className="text-2xl font-display font-extrabold text-primary tabular-nums">
-                  {formatStakeAmount(totalAtRisk, selectedCurrency)}
+                  {formatStakeAmount(liveTotalAtRisk, selectedCurrency)}
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">At Risk</p>
               </div>
@@ -130,7 +183,7 @@ export default function Dashboard() {
                 <p className="text-xs text-muted-foreground mt-0.5">Completed</p>
               </div>
             </div>
-            {totalAtRisk > 0 && (
+            {liveTotalAtRisk > 0 && (
               <p className="text-center text-xs text-muted-foreground mt-4">
                 {watchingJudges > 0
                   ? watchingJudges === 1
@@ -142,7 +195,7 @@ export default function Dashboard() {
           </motion.div>
 
           <div className="px-6">
-            <h2 className="text-xs uppercase tracking-widest text-muted-foreground mb-4">Active Contracts</h2>
+            <h2 className="text-xs uppercase tracking-widest text-muted-foreground mb-4">Active Goals</h2>
             <ResolvedGoalSpotlight goals={spotlightGoals} />
             <div className="space-y-4">
               {sortedContractGoals.map((goal) => (

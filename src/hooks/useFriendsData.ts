@@ -1,7 +1,9 @@
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import { queryKeys } from '@/lib/queryKeys';
 import { fetchFriendsBundle, type FriendsBundle } from '@/lib/fetchers/tabData';
+import { supabase } from '@/integrations/supabase/client';
 
 const empty: FriendsBundle = { friends: [], incoming: [], judgeRequests: [] };
 const FRIENDS_TIMEOUT_MS = 7000;
@@ -32,6 +34,56 @@ export function useFriendsData() {
     enabled: !!userId && !authLoading,
     retry: false,
   });
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const tick = () => {
+      if (document.visibilityState === 'visible') void query.refetch();
+    };
+    const intervalId = window.setInterval(tick, 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [userId, query]);
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const channel = supabase
+      .channel(`friends_bundle_refresh_${userId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'friendships' },
+        () => {
+          void query.refetch();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'friend_requests' },
+        () => {
+          void query.refetch();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'judge_requests' },
+        () => {
+          void query.refetch();
+        },
+      )
+      .subscribe((status, err) => {
+        if (status === 'CHANNEL_ERROR' && err) {
+          console.warn('Friends data realtime channel error', err);
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [userId, query]);
 
   const data = query.data ?? empty;
 

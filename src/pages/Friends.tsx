@@ -7,10 +7,21 @@ import UserProfilePopover from '@/components/UserProfilePopover';
 import { useAuth } from '@/hooks/useAuth';
 import { useFriendsData } from '@/hooks/useFriendsData';
 import { queryKeys } from '@/lib/queryKeys';
-import type { ProfileLite } from '@/lib/fetchers/tabData';
+import type { FriendsBundle, ProfileLite } from '@/lib/fetchers/tabData';
 import { Check, Copy, Search, Share2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { FriendsPageSkeleton } from '@/components/PageSkeletons';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function Friends() {
   const { user } = useAuth();
@@ -21,6 +32,8 @@ export default function Friends() {
   const [searchResult, setSearchResult] = useState<ProfileLite | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [friendToRemove, setFriendToRemove] = useState<(typeof friends)[number] | null>(null);
+  const [removingFriendId, setRemovingFriendId] = useState<string | null>(null);
   const [myFriendCode, setMyFriendCode] = useState<string | null>(null);
   const [friendCodeDbReady, setFriendCodeDbReady] = useState(true);
 
@@ -74,18 +87,21 @@ export default function Friends() {
 
   const normalizedSearchCode = useMemo(() => searchCode.replace(/\D/g, '').slice(0, 11), [searchCode]);
   const inviteUrl = useMemo(() => `${window.location.origin}/auth`, []);
+  const searchResultAlreadyFriend = useMemo(
+    () => (searchResult ? friends.some((friend) => friend.id === searchResult.id) : false),
+    [friends, searchResult],
+  );
 
   const shareInviteLink = async () => {
-    const nativeShareText = myFriendCode ? `Join me on Owe It\nMy Friend ID: ${myFriendCode}` : 'Join me on Owe It';
-    const fallbackText = myFriendCode
-      ? `Join me on Owe It: ${inviteUrl}\nMy Friend ID: ${myFriendCode}`
+    const shareText = myFriendCode
+      ? `Join me on Owe It: ${inviteUrl}\nMy Account ID: ${myFriendCode}`
       : `Join me on Owe It: ${inviteUrl}`;
     try {
       if (navigator.share) {
+        // Send a single text payload so targets like WhatsApp don't split/reformat
+        // title/url into separate lines.
         await navigator.share({
-          title: 'Join me on Owe It',
-          text: nativeShareText,
-          url: inviteUrl,
+          text: shareText,
         });
         return;
       }
@@ -98,7 +114,7 @@ export default function Friends() {
 
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(fallbackText);
+        await navigator.clipboard.writeText(shareText);
         toast.success('Invite link copied.');
         return;
       }
@@ -113,7 +129,7 @@ export default function Friends() {
     setSearchError(null);
     setSearchResult(null);
     if (normalizedSearchCode.length !== 11) {
-      setSearchError('Enter an 11-digit Friend ID.');
+      setSearchError('Enter an 11-digit Account ID.');
       return;
     }
     setSearching(true);
@@ -128,14 +144,14 @@ export default function Friends() {
       console.error('Friend search error', error);
       const msg = String((error as any)?.message ?? '').toLowerCase();
       if (msg.includes('friend_code') && (msg.includes('column') || msg.includes('schema') || msg.includes('does not exist'))) {
-        setSearchError('friend id is not enabled yet (db update needed)');
+        setSearchError('account id is not enabled yet (db update needed)');
       } else {
         setSearchError('account not found');
       }
       return;
     }
     if (!data) {
-      setSearchError('No user found with that Friend ID.');
+      setSearchError('No user found with that Account ID.');
       return;
     }
     setSearchResult({
@@ -147,7 +163,7 @@ export default function Friends() {
   };
 
   const sendRequest = async () => {
-    if (!normalizedSearchCode || normalizedSearchCode.length !== 11) return;
+    if (!normalizedSearchCode || normalizedSearchCode.length !== 11 || searchResultAlreadyFriend) return;
     setSending(true);
     setSearchError(null);
     const { error } = await supabase.rpc('send_friend_request_by_code', { p_to_friend_code: normalizedSearchCode });
@@ -162,9 +178,35 @@ export default function Friends() {
   };
 
   const accept = async (requestId: string) => {
+    if (user?.id) {
+      const request = incoming.find((r) => r.id === requestId);
+      if (request) {
+        queryClient.setQueryData<FriendsBundle>(queryKeys.friends(user.id), (prev) => {
+          if (!prev) return prev;
+          const requestName = request.fromProfile?.display_name?.trim() || 'Friend';
+          const nextFriend = {
+            id: request.from_user_id,
+            name: requestName,
+            avatar: request.fromProfile?.avatar_url ?? '',
+            activeGoals: 0,
+            completedGoals: 0,
+            totalStaked: 0,
+          };
+          const alreadyPresent = prev.friends.some((friend) => friend.id === nextFriend.id);
+          const friendsNext = alreadyPresent ? prev.friends : [...prev.friends, nextFriend].sort((a, b) => a.name.localeCompare(b.name));
+          return {
+            ...prev,
+            incoming: prev.incoming.filter((r) => r.id !== requestId),
+            friends: friendsNext,
+          };
+        });
+      }
+    }
+
     const { error } = await supabase.rpc('accept_friend_request', { p_request_id: requestId });
     if (error) {
       console.error('Accept request error', error);
+      invalidateFriends();
       return;
     }
     invalidateFriends();
@@ -176,6 +218,37 @@ export default function Friends() {
       console.error('Ignore request error', error);
       return;
     }
+    invalidateFriends();
+  };
+
+  const removeFriend = async () => {
+    if (!friendToRemove || !user?.id) return;
+
+    const removingId = friendToRemove.id;
+    setRemovingFriendId(removingId);
+    queryClient.setQueryData<FriendsBundle>(queryKeys.friends(user.id), (prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        friends: prev.friends.filter((friend) => friend.id !== removingId),
+      };
+    });
+
+    const { error } = await supabase.rpc('remove_friend', { p_friend_user_id: removingId });
+    setRemovingFriendId(null);
+    setFriendToRemove(null);
+
+    if (error) {
+      console.error('Remove friend error', error);
+      toast.error(error.message || 'Could not remove friend.');
+      invalidateFriends();
+      return;
+    }
+
+    if (searchResult?.id === removingId) {
+      setSearchResult((prev) => prev);
+    }
+    toast.success('Friend removed.');
     invalidateFriends();
   };
 
@@ -194,9 +267,10 @@ export default function Friends() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="text-3xl font-display font-extrabold text-foreground mt-2 tracking-tight"
+            className="mt-2 pr-2 text-xl font-display font-extrabold leading-snug tracking-tight text-balance text-foreground"
           >
-            Accountability Partners
+            <span className="block">Progress grows better with people.</span>
+            <span className="block">Choose your circle wisely.</span>
           </motion.h1>
         </div>
         <UserProfilePopover />
@@ -257,32 +331,9 @@ export default function Friends() {
             </button>
           </div>
         </motion.div>
+        <div className="mx-1 h-px bg-border/70" aria-hidden />
 
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.04 }}
-          className="p-5 rounded-[20px] bg-card border border-border"
-        >
-          <div className="flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <h4 className="font-display font-semibold text-foreground">Invite by link</h4>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Send a signup link so your friends can create an Owe It account.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void shareInviteLink()}
-              className="h-11 px-4 rounded-2xl bg-primary text-primary-foreground font-display font-bold inline-flex items-center gap-2 shrink-0"
-            >
-              <Share2 className="w-4 h-4" />
-              Share link
-            </button>
-          </div>
-        </motion.div>
-
-        {/* Add a friend by Friend ID */}
+        {/* Add a friend by Account ID */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -292,7 +343,7 @@ export default function Friends() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <h4 className="font-display font-semibold text-foreground">Add a friend</h4>
-              <p className="text-xs text-muted-foreground mt-0.5">search by friend id</p>
+              <p className="text-xs text-muted-foreground mt-0.5">search by account id</p>
             </div>
           </div>
 
@@ -324,9 +375,12 @@ export default function Friends() {
 
           {searchResult && (
             <div className="mt-4 p-4 rounded-2xl bg-muted border border-border flex items-center gap-4">
-              <div className="w-11 h-11 rounded-full bg-background flex items-center justify-center font-display font-bold text-muted-foreground">
-                {(searchResult.display_name || 'U').charAt(0)}
-              </div>
+              <Avatar className="h-11 w-11 bg-background">
+                <AvatarImage src={searchResult.avatar_url || ''} alt={searchResult.display_name || 'User'} className="object-cover" />
+                <AvatarFallback className="bg-background font-display font-bold text-muted-foreground">
+                  {(searchResult.display_name || 'U').charAt(0)}
+                </AvatarFallback>
+              </Avatar>
               <div className="flex-1">
                 <p className="font-display font-semibold text-foreground">
                   {searchResult.display_name || 'User'}
@@ -336,10 +390,10 @@ export default function Friends() {
               <button
                 type="button"
                 onClick={() => void sendRequest()}
-                disabled={sending}
-                className="px-4 py-2 rounded-xl bg-[#4ade80] text-[#022c22] font-display font-bold disabled:opacity-60"
+                disabled={sending || searchResultAlreadyFriend}
+                className="px-4 py-2 rounded-xl bg-[#4ade80] text-[#022c22] font-display font-bold disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {sending ? 'Sending…' : 'Send request'}
+                {searchResultAlreadyFriend ? 'Already friends' : sending ? 'Sending…' : 'Send request'}
               </button>
             </div>
           )}
@@ -360,9 +414,16 @@ export default function Friends() {
                   key={r.id}
                   className="p-4 rounded-2xl bg-card border border-border flex items-center gap-3"
                 >
-                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center font-display font-bold text-muted-foreground">
-                    {(r.fromProfile?.display_name || 'U').charAt(0)}
-                  </div>
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage
+                      src={r.fromProfile?.avatar_url || ''}
+                      alt={r.fromProfile?.display_name || 'User'}
+                      className="object-cover"
+                    />
+                    <AvatarFallback className="font-display font-bold text-muted-foreground">
+                      {(r.fromProfile?.display_name || 'U').charAt(0)}
+                    </AvatarFallback>
+                  </Avatar>
                   <div className="flex-1">
                     <p className="font-display font-semibold text-foreground">
                       {r.fromProfile?.display_name || 'User'}
@@ -396,11 +457,66 @@ export default function Friends() {
         )}
 
         {friends.map((friend, i) => (
-          <FriendCard key={friend.id} friend={friend} index={i} />
+          <FriendCard
+            key={friend.id}
+            friend={friend}
+            index={i}
+            removing={removingFriendId === friend.id}
+            onRemove={setFriendToRemove}
+          />
         ))}
+        <div className="mx-1 h-px bg-border/70" aria-hidden />
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.04 }}
+          className="p-5 rounded-[20px] bg-card border border-border"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <h4 className="font-display font-semibold text-foreground">Invite by link</h4>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Send a signup link so your friends can create an Owe It account.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void shareInviteLink()}
+              className="h-11 px-4 rounded-2xl bg-primary text-primary-foreground font-display font-bold inline-flex items-center gap-2 shrink-0"
+            >
+              <Share2 className="w-4 h-4" />
+              Share link
+            </button>
+          </div>
+        </motion.div>
           </>
         )}
       </div>
+      <AlertDialog open={friendToRemove !== null} onOpenChange={(open) => !open && !removingFriendId && setFriendToRemove(null)}>
+        <AlertDialogContent className="max-w-md rounded-2xl border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-display">Remove friend?</AlertDialogTitle>
+            <AlertDialogDescription className="text-center text-muted-foreground">
+              {friendToRemove ? `${friendToRemove.name} will be removed from your friends list.` : 'This friend will be removed.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-2">
+            <AlertDialogCancel className="rounded-xl font-display font-semibold mt-0 sm:mt-0" disabled={Boolean(removingFriendId)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="w-full sm:w-auto rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 font-display font-bold"
+              disabled={Boolean(removingFriendId)}
+              onClick={(e) => {
+                e.preventDefault();
+                void removeFriend();
+              }}
+            >
+              {removingFriendId ? 'Removing…' : 'Remove friend'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

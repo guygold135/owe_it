@@ -23,9 +23,11 @@ export default function Pulse() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="text-3xl font-display font-extrabold text-foreground mt-2 tracking-tight"
+            className="mt-2 pr-2 text-xl font-display font-extrabold leading-snug tracking-tight text-balance text-foreground"
           >
-            What's happening
+            See the promises people make.
+            <br />
+            Watch who follows through.
           </motion.h1>
           <div className="flex items-center gap-2 mt-3">
             <Clock className="w-3 h-3 text-muted-foreground" />

@@ -80,7 +80,7 @@ export function BottomNav({
           type="button"
           onClick={onCreateGoal}
           className={cn(
-            'relative z-[4] shrink-0 w-12 h-12 rounded-2xl bg-primary flex items-center justify-center glow-primary -mt-3',
+            'relative z-[4] shrink-0 w-12 h-12 rounded-2xl bg-primary flex items-center justify-center glow-primary',
             fabTutorialSpotlight && 'shadow-lg shadow-primary/30',
           )}
         >

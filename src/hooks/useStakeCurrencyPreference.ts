@@ -12,11 +12,15 @@ function readStoredStakeCurrency(): StakeCurrency {
   }
 }
 
-export function useStakeCurrencyPreference() {
-  const [currency, setCurrency] = useState<StakeCurrency>(DEFAULT_STAKE_CURRENCY);
+export function useStakeCurrencyPreference(options?: { listenForChanges?: boolean }) {
+  const listenForChanges = options?.listenForChanges ?? true;
+  const [currency, setCurrency] = useState<StakeCurrency>(() => {
+    if (typeof window === 'undefined') return DEFAULT_STAKE_CURRENCY;
+    return readStoredStakeCurrency();
+  });
 
   useEffect(() => {
-    setCurrency(readStoredStakeCurrency());
+    if (!listenForChanges) return;
 
     const onStorage = (event: StorageEvent) => {
       if (event.key !== STAKE_CURRENCY_KEY) return;
@@ -32,7 +36,7 @@ export function useStakeCurrencyPreference() {
       window.removeEventListener('storage', onStorage);
       window.removeEventListener(STAKE_CURRENCY_CHANGED_EVENT, onInternalChange);
     };
-  }, []);
+  }, [listenForChanges]);
 
   const updateCurrency = (next: StakeCurrency) => {
     const normalized = normalizeStakeCurrency(next);

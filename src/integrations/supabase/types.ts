@@ -241,6 +241,10 @@ export type Database = {
         Args: { p_request_id: string }
         Returns: undefined
       }
+      remove_friend: {
+        Args: { p_friend_user_id: string }
+        Returns: undefined
+      }
       create_judge_request: {
         Args: { p_judge_user_id: string; p_goal_payload: Json }
         Returns: string

@@ -25,6 +25,7 @@ import NotFound from "./pages/NotFound";
 import { JudgeRequestToastHost } from "@/components/JudgeRequestToastHost";
 import { JudgeGoalCreatedNoticeHost } from "@/components/JudgeGoalCreatedNoticeHost";
 import { DeadlineReminderToastHost } from "@/components/DeadlineReminderToastHost";
+import { FriendRequestToastHost } from "@/components/FriendRequestToastHost";
 import { AppVersionQuote } from "@/components/AppVersionQuote";
 import { PasswordRecoveryScreen } from "@/components/PasswordRecoveryScreen";
 import { APP_LOGO_SRC } from "@/lib/brandAssets";
@@ -198,6 +199,7 @@ function LoggedInAppShell({
       />
       <CreateGoalSheet open={createOpen} onClose={() => setCreateOpen(false)} />
       <AppTutorialChrome onCloseCreateSheet={() => setCreateOpen(false)} />
+      <FriendRequestToastHost />
       <JudgeRequestToastHost />
       <JudgeGoalCreatedNoticeHost />
       <DeadlineReminderToastHost />

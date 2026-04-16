@@ -98,6 +98,8 @@ function ProfileInner() {
   const [editSaving, setEditSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
+  const knownEarnedAchievementIdsRef = useRef<Set<string>>(new Set());
+  const initializedAchievementsRef = useRef(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -412,6 +414,35 @@ function ProfileInner() {
 
   const loading = goalsLoading || judgeGoalsLoading || profileLoading;
 
+  useEffect(() => {
+    if (loading) return;
+
+    const earnedAchievements = achievements.filter((achievement) => achievement.progress >= achievement.target);
+    const earnedIds = new Set(earnedAchievements.map((achievement) => achievement.id));
+
+    if (!initializedAchievementsRef.current) {
+      knownEarnedAchievementIdsRef.current = earnedIds;
+      initializedAchievementsRef.current = true;
+      return;
+    }
+
+    earnedAchievements.forEach((achievement) => {
+      if (knownEarnedAchievementIdsRef.current.has(achievement.id)) return;
+
+      toast.success("Achievement completed!", {
+        id: `achievement-${achievement.id}`,
+        description: `${achievement.title}: ${achievement.description}`,
+      });
+    });
+
+    knownEarnedAchievementIdsRef.current = earnedIds;
+  }, [achievements, loading]);
+
+  useEffect(() => {
+    initializedAchievementsRef.current = false;
+    knownEarnedAchievementIdsRef.current = new Set();
+  }, [user?.id]);
+
   return (
     <div className="min-h-screen bg-background pb-28">
       <div className="px-6 pt-12 pb-6 flex items-start justify-between gap-4">
@@ -522,7 +553,7 @@ function ProfileInner() {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
                   <IdCard className="w-3.5 h-3.5 shrink-0" />
                   <span className="min-w-0 truncate">
-                    your friend id {friendCodeDbReady ? friendCode ?? "…" : "unavailable"}
+                    your account id {friendCodeDbReady ? friendCode ?? "…" : "unavailable"}
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
@@ -541,7 +572,7 @@ function ProfileInner() {
                     try {
                       if (navigator.clipboard?.writeText) {
                         await navigator.clipboard.writeText(friendCode);
-                        toast.success("Friend ID copied.");
+                        toast.success("Account ID copied.");
                         return;
                       }
                     } catch (e) {
@@ -557,14 +588,14 @@ function ProfileInner() {
                       ta.select();
                       document.execCommand("copy");
                       document.body.removeChild(ta);
-                      toast.success("Friend ID copied.");
+                      toast.success("Account ID copied.");
                     } catch (e) {
                       console.error("Clipboard fallback error", e);
-                      toast.error("Could not copy Friend ID.");
+                      toast.error("Could not copy Account ID.");
                     }
                   }}
                 >
-                  Copy Friend ID
+                  Copy Account ID
                 </Button>
               </div>
             </div>

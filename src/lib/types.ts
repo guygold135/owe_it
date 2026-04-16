@@ -19,7 +19,7 @@ export interface Goal {
 }
 
 /** Goal shown on "My judges" — includes creator info for cards */
-export type JudgeGoal = Goal & { creatorId: string; creatorName: string };
+export type JudgeGoal = Goal & { creatorId: string; creatorName: string; creatorAvatar: string };
 
 export interface Judge {
   id: string;

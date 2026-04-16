@@ -30,7 +30,13 @@ import {
 } from '@/components/ui/alert-dialog';
 import { PublishButton, type PublishPhase } from '@/components/ui/publish-button';
 import { SuccessMorphIcon } from '@/components/ui/animated-state-icons';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import type { ProfileLite } from '@/lib/fetchers/tabData';
+import {
+  PROFILE_AVATAR_UPDATED_EVENT,
+  readProfileAvatarFromStorage,
+  writeProfileAvatarToStorage,
+} from '@/lib/profileAvatarEvents';
 
 const steps = ['goal', 'stake', 'judge', 'card', 'confirm'] as const;
 
@@ -216,6 +222,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const tutorialSheetStepRef = useRef<number | null>(null);
   const { addGoal, loadGoals, goals } = useGoals();
   const { user } = useAuth();
+  const [selfAvatarUrl, setSelfAvatarUrl] = useState<string | null>(() => readProfileAvatarFromStorage(user?.id));
   const { currency: stakeCurrency } = useStakeCurrencyPreference();
   const { minimumStake } = useMinimumStakeMajor(stakeCurrency);
   const { enabled: allowShortDeadlines } = useShortDeadlineTesting();
@@ -257,6 +264,37 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   useEffect(() => {
     stakeRef.current = stake;
   }, [stake]);
+
+  useEffect(() => {
+    setSelfAvatarUrl(readProfileAvatarFromStorage(user?.id));
+    if (!user?.id) return;
+
+    let cancelled = false;
+    void supabase
+      .from('profiles')
+      .select('avatar_url')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled || error) return;
+        const row = data as { avatar_url?: string | null } | null;
+        const nextAvatar = row?.avatar_url?.trim() || null;
+        setSelfAvatarUrl(nextAvatar);
+        writeProfileAvatarToStorage(user.id, nextAvatar);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    const refreshAvatar = () => {
+      setSelfAvatarUrl(readProfileAvatarFromStorage(user?.id));
+    };
+    window.addEventListener(PROFILE_AVATAR_UPDATED_EVENT, refreshAvatar);
+    return () => window.removeEventListener(PROFILE_AVATAR_UPDATED_EVENT, refreshAvatar);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!open) {
@@ -360,6 +398,49 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     void loadFriends();
   }, [loadFriends]);
 
+  useEffect(() => {
+    if (!open || !user?.id) return;
+
+    const tick = () => {
+      if (document.visibilityState === 'visible') void loadFriends();
+    };
+    const intervalId = window.setInterval(tick, 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [open, user?.id, loadFriends]);
+
+  useEffect(() => {
+    if (!open || !user?.id) return;
+
+    const refreshFriends = () => {
+      void loadFriends();
+    };
+
+    const channel = supabase
+      .channel(`create_goal_sheet_friends_${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'friendships' },
+        refreshFriends,
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'friend_requests' },
+        refreshFriends,
+      )
+      .subscribe((status, err) => {
+        if (status === 'CHANNEL_ERROR' && err) {
+          console.warn('Create goal sheet friends realtime error', err);
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [open, user?.id, loadFriends]);
+
   const normalizedJudgeByIdCode = useMemo(
     () => judgeByIdInput.replace(/\D/g, '').slice(0, 11),
     [judgeByIdInput],
@@ -370,7 +451,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     setJudgeByIdResult(null);
     if (!user?.id) return;
     if (normalizedJudgeByIdCode.length !== 11) {
-      setJudgeByIdError('Enter an 11-digit Friend ID.');
+      setJudgeByIdError('Enter an 11-digit Account ID.');
       return;
     }
     setJudgeByIdSearching(true);
@@ -385,19 +466,19 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       console.error('Friend search error', error);
       const msg = String((error as any)?.message ?? '').toLowerCase();
       if (msg.includes('friend_code') && (msg.includes('column') || msg.includes('schema') || msg.includes('does not exist'))) {
-        setJudgeByIdError('Friend ID is not available yet.');
+        setJudgeByIdError('Account ID is not available yet.');
       } else {
         setJudgeByIdError('Could not look up this ID.');
       }
       return;
     }
     if (!data) {
-      setJudgeByIdError('No user found with that Friend ID.');
+      setJudgeByIdError('No user found with that Account ID.');
       return;
     }
     const row = data as any;
     if (row.id === user.id) {
-      setJudgeByIdError('That’s your Friend ID. Pick someone else.');
+      setJudgeByIdError('That’s your Account ID. Pick someone else.');
       return;
     }
     setJudgeByIdResult({
@@ -981,9 +1062,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               className="fixed bottom-0 left-0 right-0 z-50 bg-[#0f0f0f] border-t border-border rounded-t-[32px] h-[640px] max-h-[90vh] overflow-y-visible overflow-x-hidden [color-scheme:dark]"
               style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
             >
-            <div className={`relative h-full flex flex-col ${step === 1 ? 'p-5 pt-4' : 'p-6'}`}>
+            <div className="relative h-full flex flex-col p-6">
               {/* Header */}
-              <div className={`flex items-center justify-between ${step === 1 ? 'mb-3' : 'mb-6'}`}>
+              <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-display font-bold text-foreground">
                   {step === 0 && 'Define Your Goal'}
                   {step === 1 && 'Set Your Stake'}
@@ -1006,7 +1087,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               </div>
 
               {/* Step indicators */}
-              <div className={`flex gap-2 ${step === 1 ? 'mb-3' : 'mb-6'}`}>
+              <div className="flex gap-2 mb-6">
                 {steps.map((_, i) => {
                   const isCompleted = i <= step;
                   return (
@@ -1159,9 +1240,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
               {/* Step 1: Stake */}
               {step === 1 && (
-                <div className="flex flex-1 flex-col gap-2">
-                  <div className="text-center py-1">
-                    <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Your Stake</p>
+                <div className="flex flex-1 flex-col gap-5">
+                  <div className="text-center">
+                    <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Your Stake</p>
                     <motion.div
                       key={stake}
                       initial={{ scale: 1 }}
@@ -1172,7 +1253,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       {formatStakeAmount(stake, stakeCurrency)}
                     </motion.div>
                   </div>
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-4 gap-2">
                     {presetStakes.map(amount => (
                       <button
                         key={amount}
@@ -1193,8 +1274,8 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       </button>
                     ))}
                   </div>
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
                       <Heart className="h-3 w-3 shrink-0" aria-hidden />
                       <span>If you fail, stake goes to</span>
                     </div>
@@ -1223,16 +1304,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         Pick a paid stake above to choose a charity. Free goals are not charged.
                       </p>
                     )}
-                    {stake > 0 ? (
-                      <p className="text-[10px] text-muted-foreground/90 leading-snug px-0.5">
-                        Automatic transfer to the charity uses Stripe Connect. Until each charity has an{' '}
-                        <code className="text-foreground/80">acct_…</code> id in the server config, charges still work but
-                        funds stay on your platform account for manual payout.
-                      </p>
-                    ) : null}
                   </div>
-                  <div className="space-y-1.5 pb-0.5">
-                    <label className="text-[11px] uppercase tracking-widest text-muted-foreground block">
+                  <div className="space-y-2 pb-0.5">
+                    <label className="text-xs uppercase tracking-widest text-muted-foreground mb-2 block">
                       Or custom amount
                     </label>
                     <div className="flex items-center gap-1.5">
@@ -1296,10 +1370,10 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     <div className="space-y-1 text-[11px] text-muted-foreground leading-snug">
                       <p>Minimum paid stake: {formatStakeAmount(minimumStake, stakeCurrency)}.</p>
                       <p>
-                        If the stake is charged, the combined payment processing and app fee is{' '}
+                        Only if the stake is charged, the combined payment processing and app fee is{' '}
                         <span className="text-foreground/90">6.7% + US$0.50</span>. The rest is transferred to the charity
-                        you selected. Non-USD stakes settle in {stakeCurrency.toUpperCase()}; the US dollar fixed fee is
-                        approximate at other currencies.
+                        you selected. Non-USD stakes settle in EUR; the US dollar fixed fee is approximate at other
+                        currencies.
                       </p>
                       <p>
                         If your card is billed in another currency, your bank may charge a separate conversion fee we do
@@ -1350,9 +1424,12 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         }`}
                       >
                         <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
-                            <User className="w-5 h-5 text-muted-foreground" />
-                          </div>
+                          <Avatar className="h-12 w-12">
+                            <AvatarImage src={selfAvatarUrl || ''} alt={user?.displayName || 'You'} className="object-cover" />
+                            <AvatarFallback>
+                              <User className="w-5 h-5 text-muted-foreground" />
+                            </AvatarFallback>
+                          </Avatar>
                           <div className="flex-1">
                             <h4 className="font-display font-semibold text-foreground">Judge Yourself</h4>
                             <div className="flex items-center gap-1 mt-1">
@@ -1367,27 +1444,32 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
                       <p className="text-xs uppercase tracking-widest text-muted-foreground">Your Friends</p>
 
-                      <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-                        {friends.map(friend => (
-                          <button
-                            key={friend.id}
-                            onClick={() => setJudge({ id: friend.id, name: friend.name, avatar: '', isSelf: false })}
-                            className={`w-full p-5 rounded-[20px] border text-left transition-all ${
-                              judge?.id === friend.id ? 'border-primary bg-primary/5' : 'border-border hover:border-muted-foreground/30'
-                            }`}
-                          >
-                            <div className="flex items-center gap-4">
-                              <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center font-display font-bold text-muted-foreground">
-                                {friend.name.charAt(0)}
+                      {friends.length > 0 ? (
+                        <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                          {friends.map(friend => (
+                            <button
+                              key={friend.id}
+                              onClick={() => setJudge({ id: friend.id, name: friend.name, avatar: friend.avatar, isSelf: false })}
+                              className={`w-full p-5 rounded-[20px] border text-left transition-all ${
+                                judge?.id === friend.id ? 'border-primary bg-primary/5' : 'border-border hover:border-muted-foreground/30'
+                              }`}
+                            >
+                              <div className="flex items-center gap-4">
+                                <Avatar className="h-12 w-12">
+                                  <AvatarImage src={friend.avatar || ''} alt={friend.name} className="object-cover" />
+                                  <AvatarFallback className="font-display font-bold text-muted-foreground">
+                                    {friend.name.charAt(0)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <h4 className="font-display font-semibold text-foreground">{friend.name}</h4>
+                                  <span className="text-xs text-muted-foreground">{friend.completedGoals} judgments made</span>
+                                </div>
                               </div>
-                              <div>
-                                <h4 className="font-display font-semibold text-foreground">{friend.name}</h4>
-                                <span className="text-xs text-muted-foreground">{friend.completedGoals} judgments made</span>
-                              </div>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
 
                       <div className="rounded-2xl border border-border bg-muted/25 p-4 space-y-3">
                         <div className="flex gap-3">
@@ -1395,7 +1477,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                             <UserPlus className="h-4 w-4 text-muted-foreground" aria-hidden />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-display font-semibold text-foreground">Add by Friend ID</p>
+                            <p className="text-sm font-display font-semibold text-foreground">Add by Account ID</p>
                             <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
                               Find someone by their 11-digit ID. They must accept your friend request before you can invite
                               them as judge.
@@ -1415,7 +1497,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') void searchJudgeByFriendId();
                             }}
-                            placeholder="11-digit Friend ID"
+                            placeholder="11-digit Account ID"
                             className="min-w-0 flex-1 rounded-xl bg-background/60 px-3 py-2.5 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary [color-scheme:dark]"
                           />
                           <button
@@ -1430,9 +1512,16 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         {judgeByIdError ? <p className="text-xs text-destructive">{judgeByIdError}</p> : null}
                         {judgeByIdResult ? (
                           <div className="flex items-center gap-3 rounded-xl border border-border bg-background/40 px-3 py-2.5">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted font-display font-bold text-muted-foreground">
-                              {(judgeByIdResult.display_name || 'U').charAt(0)}
-                            </div>
+                            <Avatar className="h-10 w-10 shrink-0">
+                              <AvatarImage
+                                src={judgeByIdResult.avatar_url || ''}
+                                alt={judgeByIdResult.display_name || 'User'}
+                                className="object-cover"
+                              />
+                              <AvatarFallback className="font-display font-bold text-muted-foreground">
+                                {(judgeByIdResult.display_name || 'U').charAt(0)}
+                              </AvatarFallback>
+                            </Avatar>
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-display font-semibold text-sm text-foreground">
                                 {judgeByIdResult.display_name || 'User'}
@@ -1617,12 +1706,12 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
               {/* Navigation: hide on card & confirm (those steps use Back + primary in a row) */}
               {step < 4 && step !== 3 && !(step === 2 && Boolean(judgeRequestId)) && (
-                <div className={`flex gap-3 ${step === 1 ? 'mt-3' : 'mt-8'}`}>
+                <div className="flex gap-3 mt-8">
                   {step > 0 && (
                     <button
                       type="button"
                       onClick={goBack}
-                      className={`flex-1 rounded-2xl bg-muted text-muted-foreground font-display font-semibold ${step === 1 ? 'py-3' : 'py-4'}`}
+                      className="flex-1 rounded-2xl bg-muted text-muted-foreground font-display font-semibold py-4"
                     >
                       Back
                     </button>
@@ -1631,7 +1720,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     type="button"
                     onClick={() => canNext() && goNext()}
                     disabled={!canNext()}
-                    className={`flex-1 rounded-2xl bg-primary text-primary-foreground font-display font-bold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${step === 1 ? 'py-3' : 'py-4'}`}
+                    className="flex-1 rounded-2xl bg-primary text-primary-foreground font-display font-bold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed py-4"
                   >
                     Continue <ChevronRight className="w-4 h-4" />
                   </button>

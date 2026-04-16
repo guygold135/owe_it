@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
+import { HoldToConfirmButton } from '@/components/ui/hold-to-confirm-button';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -19,6 +20,7 @@ import { SUPPORTED_STAKE_CURRENCIES, formatStakeCurrencyLabel, type StakeCurrenc
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
 import { useShortDeadlineTesting } from '@/hooks/useShortDeadlineTesting';
 import { useGoals } from '@/hooks/useGoals';
+import UserProfilePopover from '@/components/UserProfilePopover';
 
 export default function Settings() {
   const { user, signOut } = useAuth();
@@ -100,17 +102,20 @@ export default function Settings() {
 
   return (
     <div className="min-h-screen bg-background pb-28">
-      <div className="px-6 pt-12 pb-6">
-        <motion.h1
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-3xl font-display font-extrabold text-foreground tracking-tight"
-        >
-          Settings
-        </motion.h1>
-        <p className="text-sm text-muted-foreground mt-2">
-          Manage your account and data.
-        </p>
+      <div className="px-6 pt-12 pb-6 flex items-start justify-between gap-4">
+        <div>
+          <motion.h1
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-3xl font-display font-extrabold text-foreground tracking-tight"
+          >
+            Settings
+          </motion.h1>
+          <p className="text-sm text-muted-foreground mt-2">
+            Manage your account and data.
+          </p>
+        </div>
+        <UserProfilePopover />
       </div>
 
       <div className="px-6 space-y-6">
@@ -301,19 +306,31 @@ export default function Settings() {
             </div>
           )}
 
+          <p className="text-center text-xs font-medium uppercase tracking-widest text-muted-foreground/80">
+            Hold to accept
+          </p>
           <AlertDialogFooter className="gap-2 sm:gap-2">
             <AlertDialogCancel disabled={loading} className="mt-0 sm:mt-0">
               Cancel
             </AlertDialogCancel>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={loading}
-              className="w-full sm:w-auto"
-              onClick={() => void confirmDeleteAccount()}
-            >
-              {loading ? 'Deleting…' : 'Yes, delete my account'}
-            </Button>
+            {loading ? (
+              <Button
+                type="button"
+                variant="destructive"
+                disabled
+                className="w-full sm:w-auto"
+              >
+                Deleting…
+              </Button>
+            ) : (
+              <HoldToConfirmButton
+                variant="destructive"
+                className="w-full sm:w-auto"
+                idleLabel="Yes, delete my account"
+                holdingLabel="Sure?"
+                onConfirm={() => confirmDeleteAccount()}
+              />
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

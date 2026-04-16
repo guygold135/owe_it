@@ -7,6 +7,7 @@ import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { consumeAuthRedirectError } from '@/lib/sessionBootstrap';
 import { APP_LOGO_SRC } from '@/lib/brandAssets';
+import { SmokeBackground } from '@/components/ui/spooky-smoke-animation';
 
 export default function Auth() {
   const { signIn, signUp, signInWithOAuth, sendPasswordResetEmail, resendSignupConfirmation } =
@@ -56,8 +57,15 @@ export default function Auth() {
           setMode('signin');
           setEmailPendingConfirmation(email.trim());
           toast.info(
-            'This email is already registered. A second signup does not send another email. Sign in below, or use “Resend confirmation email” if you still need to verify.',
-            { duration: 8000 },
+            <>
+              This email is already registered.
+              <br />
+              Try the <span className="font-semibold text-primary">Forgot password?</span> button if you
+              can't remember the password.
+            </>,
+            {
+              duration: 8000,
+            },
           );
         } else {
           setEmailPendingConfirmation(null);
@@ -119,31 +127,42 @@ export default function Auth() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6">
-      {/* Logo & Tagline */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="text-center mb-12"
-      >
-        <div className="w-28 h-28 mx-auto mb-6 flex items-center justify-center">
-          <img src={APP_LOGO_SRC} alt="" className="h-full w-full object-contain drop-shadow-sm" width={112} height={112} decoding="async" />
-        </div>
-        <h1 className="text-4xl font-display font-extrabold text-foreground tracking-tight">
-          Owe It
-        </h1>
-        <p className="text-muted-foreground mt-2 text-sm">
-          Put your money where your ambition is.
-        </p>
-      </motion.div>
+    <div className="relative min-h-screen overflow-hidden bg-background px-6 py-10">
+      <SmokeBackground smokeColor="#30e07a" />
+      <div className="relative z-10 mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-sm flex-col items-center justify-center">
+        {/* Logo & Tagline */}
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-10 text-center"
+        >
+          <div className="mx-auto mb-5 flex h-24 w-24 items-center justify-center rounded-[28px] bg-card/55 p-3 backdrop-blur-md">
+            <img
+              src={APP_LOGO_SRC}
+              alt=""
+              className="h-full w-full object-contain drop-shadow-sm"
+              width={112}
+              height={112}
+              decoding="async"
+            />
+          </div>
+          <h1 className="text-4xl font-display font-extrabold tracking-tight text-foreground">
+            Owe It
+          </h1>
+          <p className="mt-2 text-sm font-medium text-foreground/85">
+            Win for yourself or give for a cause.
+            <br />
+            Either way, something good happens.
+          </p>
+        </motion.div>
 
-      {/* Auth Form */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.15 }}
-        className="w-full max-w-sm"
-      >
+        {/* Auth Form */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="w-full rounded-[32px] border border-border/70 bg-card/78 p-5 shadow-2xl backdrop-blur-xl"
+        >
         {/* Mode Toggle */}
         <div className="flex rounded-2xl bg-card border border-border p-1 mb-8">
           {(['signin', 'signup'] as const).map((m) => (
@@ -293,7 +312,8 @@ export default function Auth() {
             {mode === 'signin' ? 'Sign up' : 'Sign in'}
           </button>
         </p>
-      </motion.div>
+        </motion.div>
+      </div>
     </div>
   );
 }

@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useCountdown } from '@/hooks/useCountdown';
-import { Lock, User, Check, X } from 'lucide-react';
+import { Lock, User, Trophy, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import type { JudgeGoal } from '@/hooks/useGoalsAsJudge';
 import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { HoldToConfirmButton } from '@/components/ui/hold-to-confirm-button';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -136,7 +137,7 @@ export function JudgeGoalCard({ goal, onResolved }: JudgeGoalCardProps) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={springTransition}
-      className={`p-6 rounded-[24px] bg-card border ${borderClass} relative overflow-hidden`}
+      className={`p-5 rounded-[24px] bg-card border ${borderClass} relative overflow-hidden`}
     >
       {/* Top row: status / timer or Completed/Uncompleted */}
       <div className="flex justify-between items-start">
@@ -154,28 +155,30 @@ export function JudgeGoalCard({ goal, onResolved }: JudgeGoalCardProps) {
       </div>
 
       {/* Title */}
-      <h3 className="text-xl font-display font-bold mt-3 tracking-tight text-foreground text-balance">
+      <h3 className="text-xl font-display font-bold mt-2 tracking-tight text-foreground text-balance">
         {goal.title}
       </h3>
 
       {/* Stake amount */}
       {goal.stake > 0 && (
         <div
-          className={`mt-3 text-3xl font-display font-extrabold tabular-nums ${accentColor}`}
+          className={`mt-2 text-3xl font-display font-extrabold tabular-nums ${accentColor}`}
         >
           {formatStakeAmount(goal.stake, goal.stakeCurrency)}
         </div>
       )}
 
       {/* Creator + judge actions */}
-      <div className="mt-6 flex flex-col gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-            <User className="w-4 h-4 text-muted-foreground" />
-          </div>
-          <span className="text-sm text-muted-foreground">
-            Goal by <span className="text-foreground font-medium">{goal.creatorName}</span>
-          </span>
+      <div className="mt-4 flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Goal by</span>
+          <Avatar className="h-8 w-8">
+            <AvatarImage src={goal.creatorAvatar || ''} alt={goal.creatorName} className="object-cover" />
+            <AvatarFallback className="text-xs font-display font-bold text-muted-foreground">
+              {goal.creatorName.charAt(0)}
+            </AvatarFallback>
+          </Avatar>
+          <span className="text-sm font-medium text-foreground">{goal.creatorName}</span>
         </div>
 
         {goal.status === 'active' && !isExpired && (
@@ -183,19 +186,19 @@ export function JudgeGoalCard({ goal, onResolved }: JudgeGoalCardProps) {
             <Button
               size="sm"
               variant="outline"
-              className="flex-1 border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-600"
+              className="h-10 flex-1 rounded-xl border-emerald-500/50 font-display font-bold text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-600"
               disabled={isBusy}
               onClick={() => setConfirmOutcome('completed')}
             >
               <>
-                <Check className="w-4 h-4 mr-1" />
+                <Trophy className="w-4 h-4 mr-1" />
                 Completed
               </>
             </Button>
             <Button
               size="sm"
               variant="outline"
-              className="flex-1 border-amber-500/50 text-amber-600 hover:bg-amber-500/10 hover:text-amber-600"
+              className="h-10 flex-1 rounded-xl border-amber-500/50 font-display font-bold text-amber-600 hover:bg-amber-500/10 hover:text-amber-600"
               disabled={isBusy}
               onClick={() => setConfirmOutcome('failed')}
             >
@@ -234,22 +237,24 @@ export function JudgeGoalCard({ goal, onResolved }: JudgeGoalCardProps) {
                 {confirmDescription}
               </AlertDialogDescription>
             </AlertDialogHeader>
+            <p className="text-center text-xs font-medium uppercase tracking-widest text-muted-foreground/80">
+              Hold to accept
+            </p>
             <AlertDialogFooter className="gap-2 sm:gap-0">
               <AlertDialogCancel className="mt-0 rounded-xl font-display font-semibold">Cancel</AlertDialogCancel>
-              <AlertDialogAction
+              <HoldToConfirmButton
                 className={
                   confirmOutcome === 'failed'
                     ? 'rounded-xl font-display font-bold bg-destructive text-destructive-foreground hover:bg-destructive/90'
                     : 'rounded-xl font-display font-bold'
                 }
-                onClick={(e) => {
-                  e.preventDefault();
+                idleLabel={confirmOutcome === 'completed' ? 'Yes, completed' : 'Yes, not completed'}
+                holdingLabel="Sure?"
+                onConfirm={() => {
                   const o = confirmOutcome;
-                  if (o) void handleResolve(o);
+                  if (o) return handleResolve(o);
                 }}
-              >
-                {confirmOutcome === 'completed' ? 'Yes, completed' : 'Yes, not completed'}
-              </AlertDialogAction>
+              />
             </AlertDialogFooter>
           </>
         ) : (

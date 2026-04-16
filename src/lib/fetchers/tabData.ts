@@ -110,7 +110,7 @@ export async function fetchUserGoals(userId: string): Promise<Goal[]> {
 
 type JudgeGoalRow = GoalRow & { user_id: string };
 
-function mapJudgeRowToGoal(row: JudgeGoalRow, creatorName: string): JudgeGoal {
+function mapJudgeRowToGoal(row: JudgeGoalRow, creatorName: string, creatorAvatar: string): JudgeGoal {
   const judge: Judge = {
     id: row.judge_name ?? 'self',
     name: row.judge_name ?? 'You',
@@ -133,6 +133,7 @@ function mapJudgeRowToGoal(row: JudgeGoalRow, creatorName: string): JudgeGoal {
     isPrivate: row.is_private,
     creatorId: row.user_id,
     creatorName,
+    creatorAvatar,
   };
 }
 
@@ -167,20 +168,23 @@ export async function fetchGoalsAsJudge(userId: string): Promise<JudgeGoal[]> {
   if (list.length === 0) return [];
 
   const creatorIds = [...new Set(list.map((r) => r.user_id))];
-  const nameById = new Map<string, string>();
+  const creatorById = new Map<string, { name: string; avatar: string }>();
   try {
     const { data: profiles } = await withTimeout(
-      supabase.from('profiles').select('id,display_name').in('id', creatorIds),
+      supabase.from('profiles').select('id,display_name,avatar_url').in('id', creatorIds),
       AUX_QUERY_TIMEOUT_MS,
     );
-    (profiles ?? []).forEach((p: { id: string; display_name: string | null }) => {
-      nameById.set(p.id, p.display_name ?? 'Someone');
+    (profiles ?? []).forEach((p: { id: string; display_name: string | null; avatar_url: string | null }) => {
+      creatorById.set(p.id, { name: p.display_name ?? 'Someone', avatar: p.avatar_url ?? '' });
     });
   } catch (e) {
     console.warn('Creator profile fetch skipped (timeout/error)', e);
   }
 
-  return list.map((row) => mapJudgeRowToGoal(row, nameById.get(row.user_id) ?? 'Someone'));
+  return list.map((row) => {
+    const creator = creatorById.get(row.user_id);
+    return mapJudgeRowToGoal(row, creator?.name ?? 'Someone', creator?.avatar ?? '');
+  });
 }
 
 export async function fetchPulseItems(userId: string): Promise<PulseItem[]> {

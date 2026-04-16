@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import UserProfilePopover from "@/components/UserProfilePopover";
 
 const SUBJECT_OPTIONS = [
   "Improvement idea",
@@ -62,17 +63,20 @@ export default function Feedback() {
 
   return (
     <div className="min-h-screen bg-background pb-28">
-      <div className="px-6 pt-12 pb-6">
-        <motion.h1
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-3xl font-display font-extrabold text-foreground tracking-tight"
-        >
-          Feedback
-        </motion.h1>
-        <p className="text-sm text-muted-foreground mt-2">
-          Tell us what is working well and what we should improve.
-        </p>
+      <div className="px-6 pt-12 pb-6 flex items-start justify-between gap-4">
+        <div>
+          <motion.h1
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-3xl font-display font-extrabold text-foreground tracking-tight"
+          >
+            Feedback
+          </motion.h1>
+          <p className="text-sm text-muted-foreground mt-2">
+            Tell us what is working well and what we should improve.
+          </p>
+        </div>
+        <UserProfilePopover />
       </div>
 
       <div className="px-6">

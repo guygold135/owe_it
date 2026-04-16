@@ -160,7 +160,7 @@ export default function UserProfilePopover() {
               loading="eager"
               decoding="async"
             />
-            <AvatarFallback className="rounded-full text-xs font-semibold" delayMs={400}>
+            <AvatarFallback className="rounded-full text-xs font-semibold">
               {initial}
             </AvatarFallback>
           </Avatar>
@@ -177,7 +177,7 @@ export default function UserProfilePopover() {
                 loading="eager"
                 decoding="async"
               />
-              <AvatarFallback className="rounded-full" delayMs={400}>
+              <AvatarFallback className="rounded-full">
                 {initial}
               </AvatarFallback>
             </Avatar>
@@ -188,12 +188,12 @@ export default function UserProfilePopover() {
               </PopoverDescription>
               <PopoverDescription className="text-xs flex items-center gap-2">
                 <span className="tabular-nums">
-                  your friend id {friendCodeDbReady ? (friendCode ?? "…") : "unavailable"}
+                  your account id {friendCodeDbReady ? (friendCode ?? "…") : "unavailable"}
                 </span>
                 <button
                   type="button"
                   className="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                  aria-label="Copy Friend ID"
+                  aria-label="Copy Account ID"
                   onClick={async () => {
                     if (!friendCodeDbReady || !friendCode) return;
                     try {

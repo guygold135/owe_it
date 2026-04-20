@@ -19,3 +19,7 @@ npm run preview
 ## Stack
 
 Vite, React, TypeScript, Tailwind CSS, Supabase, Stripe.
+
+## Deployment
+
+Use `DEPLOYMENT.md` for the full production checklist and commands.

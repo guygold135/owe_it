@@ -1,0 +1,26 @@
+name: Settle expired goals (cron)
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  settle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Supabase settlement function
+        env:
+          SETTLE_URL: https://lngepgvviuqanzlslqhf.supabase.co/functions/v1/settle-expired-goal-payments
+          AUTO_EXPIRE_CRON_SECRET: ${{ secrets.AUTO_EXPIRE_CRON_SECRET }}
+        run: |
+          if [ -z "$AUTO_EXPIRE_CRON_SECRET" ]; then
+            echo "Missing GitHub secret AUTO_EXPIRE_CRON_SECRET"
+            exit 1
+          fi
+
+          curl --fail-with-body \
+            -X POST "$SETTLE_URL" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: $AUTO_EXPIRE_CRON_SECRET" \
+            -d '{"batchSize":100}'

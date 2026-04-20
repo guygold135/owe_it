@@ -13,7 +13,8 @@
     "icons": "node scripts/rasterize-favicons.mjs",
     "icons:build": "python scripts/build_app_logo.py && node scripts/rasterize-favicons.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@capacitor/android": "^8.2.0",

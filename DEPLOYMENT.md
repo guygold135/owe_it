@@ -44,6 +44,13 @@ VITE_STRIPE_PUBLISHABLE_KEY=pk_live_...
 
 Optional (recommended for production): add **`VITE_SENTRY_DSN`** from [Sentry](https://sentry.io/) so browser errors are reported. Omit locally if you do not use it.
 
+To run **Playwright** smoke tests locally once:
+
+```bash
+npx playwright install
+npm run test:e2e
+```
+
 ---
 
 ## Operations and monitoring
@@ -135,7 +142,24 @@ supabase functions deploy stripe-webhook
 supabase functions deploy submit-feedback
 supabase functions deploy admin-feedback
 supabase functions deploy delete-account
+supabase functions deploy settlement-health
 ```
+
+### 3.2a CI Playwright (optional)
+
+For the **E2E smoke** job to run green, add these **GitHub Actions secrets** (same values as Vercel / local `.env` public keys):
+
+- `CI_VITE_SUPABASE_URL`
+- `CI_VITE_SUPABASE_PUBLISHABLE_KEY`
+- `CI_VITE_STRIPE_PUBLISHABLE_KEY`
+
+The E2E job is configured with `continue-on-error: true` until secrets exist.
+
+### 3.2b Settlement staleness alert (GitHub)
+
+Workflow **Settlement health check** (`.github/workflows/settlement-health.yml`) runs hourly. Add repository secret:
+
+- `AUTO_EXPIRE_CRON_SECRET` — must match the Supabase secret of the same name
 
 ### 3.3 Quick function health checks
 

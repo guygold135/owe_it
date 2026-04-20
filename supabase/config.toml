@@ -12,6 +12,9 @@ verify_jwt = false
 [functions.settle-expired-goal-payments]
 verify_jwt = false
 
+[functions.settlement-health]
+verify_jwt = false
+
 [functions.stripe-webhook]
 verify_jwt = false
 

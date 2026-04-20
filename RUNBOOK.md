@@ -53,6 +53,7 @@ limit 50;
 ## Alerts (what you already have)
 
 - **GitHub Actions**: `Settle expired goals (cron)` — you get email on **failed runs only** if personal notifications are enabled (`Settings → Notifications → Actions`).
+- **Settlement health**: workflow `Settlement health check` POSTs to `settlement-health` every hour. It fails if no recent row in `goal_settlement_runs` or the last run is older than ~90 minutes (configurable via Supabase secret `SETTLEMENT_HEALTH_MAX_STALE_MINUTES`). Requires GitHub secret `AUTO_EXPIRE_CRON_SECRET` matching Supabase.
 - **Sentry** (optional): frontend crashes / `AppErrorBoundary` errors when `VITE_SENTRY_DSN` is set.
 
 ---

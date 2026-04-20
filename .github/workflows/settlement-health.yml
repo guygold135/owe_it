@@ -1,0 +1,26 @@
+name: Settlement health check
+
+on:
+  schedule:
+    - cron: "25 * * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify recent settlement worker run
+        env:
+          HEALTH_URL: https://lngepgvviuqanzlslqhf.supabase.co/functions/v1/settlement-health
+          AUTO_EXPIRE_CRON_SECRET: ${{ secrets.AUTO_EXPIRE_CRON_SECRET }}
+        run: |
+          if [ -z "$AUTO_EXPIRE_CRON_SECRET" ]; then
+            echo "Missing GitHub secret AUTO_EXPIRE_CRON_SECRET (same value as Supabase AUTO_EXPIRE_CRON_SECRET)"
+            exit 1
+          fi
+
+          curl --fail-with-body \
+            -X POST "$HEALTH_URL" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: $AUTO_EXPIRE_CRON_SECRET" \
+            -d '{}'

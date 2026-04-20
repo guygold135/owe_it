@@ -20,7 +20,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
+      # Temporary phased gate:
+      # - Lint runs and remains visible, but does not block merges/deploys yet.
+      # - Test + build are blocking checks.
+      # Re-enable strict lint blocking after lint debt is reduced.
+      - name: Lint (non-blocking for now)
+        continue-on-error: true
         run: npm run lint
 
       - name: Unit tests

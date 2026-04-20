@@ -228,6 +228,19 @@ Do these in production after deploy:
 
 ---
 
+## CI quality gate
+
+This repo includes `.github/workflows/ci.yml`.
+
+It runs on pull requests and pushes to `main`, and checks:
+- `npm run lint`
+- `npm run test`
+- `npm run build`
+
+Before launch, ensure this workflow is green.
+
+---
+
 ## 8) Rollback quick plan
 
 If deployment breaks:

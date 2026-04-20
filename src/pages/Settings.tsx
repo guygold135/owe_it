@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -20,12 +20,14 @@ import { SUPPORTED_STAKE_CURRENCIES, formatStakeCurrencyLabel, type StakeCurrenc
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
 import { useShortDeadlineTesting } from '@/hooks/useShortDeadlineTesting';
 import { useGoals } from '@/hooks/useGoals';
+import { useGoalsAsJudge } from '@/hooks/useGoalsAsJudge';
 import UserProfilePopover from '@/components/UserProfilePopover';
 
 export default function Settings() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const { goals } = useGoals();
+  const { goals: judgeGoals, loading: judgeGoalsLoading } = useGoalsAsJudge();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -66,8 +68,20 @@ export default function Settings() {
   );
   const activeStakesCount = activeStakesGoals.length;
 
+  const activeStakedJudgeCommitments = useMemo(
+    () =>
+      judgeGoals.filter(
+        (g) => g.status === 'active' && g.stake > 0 && user?.id != null && g.creatorId !== user.id,
+      ),
+    [judgeGoals, user?.id],
+  );
+  const activeStakedJudgeCommitmentCount = activeStakedJudgeCommitments.length;
+  const accountDeletionBlockedByJudgeRole =
+    judgeGoalsLoading || activeStakedJudgeCommitmentCount > 0;
+
   const confirmDeleteAccount = async () => {
     if (!user) return;
+    if (accountDeletionBlockedByJudgeRole) return;
 
     setLoading(true);
 
@@ -204,7 +218,7 @@ export default function Settings() {
           </div>
           <Button
             variant="outline"
-            className="w-full bg-transparent"
+            className="w-full bg-transparent rounded-xl font-display font-semibold"
             onClick={() => setSignOutDialogOpen(true)}
           >
             Sign out
@@ -219,14 +233,13 @@ export default function Settings() {
             <div>
               <p className="text-sm font-medium text-foreground">Delete account</p>
               <p className="text-xs text-muted-foreground">
-                Permanently removes your login and related data stored for this app (goals, friends,
-                notifications, activity, and more), then signs you out.
+                Permanently removes your login and related data stored for this app, then signs you out.
               </p>
             </div>
           </div>
           <Button
             variant="destructive"
-            className="w-full"
+            className="w-full rounded-xl font-display font-bold"
             disabled={loading}
             onClick={() => setDeleteDialogOpen(true)}
           >
@@ -250,15 +263,18 @@ export default function Settings() {
               You&apos;ll be signed out of this device and returned to the login screen.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="gap-2 sm:gap-2">
-            <AlertDialogCancel disabled={loading} className="mt-0 sm:mt-0">
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel
+              disabled={loading}
+              className="mt-0 sm:mt-0 rounded-xl font-display font-semibold"
+            >
               Cancel
             </AlertDialogCancel>
             <Button
               type="button"
               variant="destructive"
               disabled={loading}
-              className="w-full sm:w-auto"
+              className="w-full sm:w-auto rounded-xl font-display font-bold relative overflow-hidden transition-all duration-300 ease-in-out"
               onClick={async () => {
                 setSignOutDialogOpen(false);
                 await signOut();
@@ -282,10 +298,41 @@ export default function Settings() {
               Delete your account?
             </AlertDialogTitle>
             <AlertDialogDescription className="text-left text-sm text-muted-foreground">
-              This permanently removes your login and all data stored for this app (goals, friends,
-              notifications, feedback, judge requests, and more). This cannot be undone.
+              This permanently removes your login and all data stored for this app. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {judgeGoalsLoading && (
+            <p className="text-left text-sm text-muted-foreground">Checking goals you judge…</p>
+          )}
+
+          {!judgeGoalsLoading && activeStakedJudgeCommitmentCount > 0 && (
+            <div
+              role="alert"
+              className="rounded-xl border-2 border-destructive bg-destructive/15 px-4 py-3 text-left shadow-sm ring-2 ring-destructive/20"
+            >
+              <p className="text-sm font-bold uppercase tracking-wide text-destructive">
+                Judge commitments
+              </p>
+              <p className="mt-1.5 text-sm font-semibold text-destructive">
+                You cannot delete your account while you are the judge on{' '}
+                {activeStakedJudgeCommitmentCount} active staked goal
+                {activeStakedJudgeCommitmentCount === 1 ? '' : 's'} owned by someone else.
+              </p>
+              <p className="mt-2 text-xs font-medium leading-relaxed text-destructive/95">
+                Those goals still need a final judgment (completed or not) while money is at stake. When
+                you have finished with every goal you judge in that situation, you can come back here
+                and delete your account.
+              </p>
+              <Link
+                to="/my-judges"
+                onClick={() => setDeleteDialogOpen(false)}
+                className="mt-3 inline-block text-xs font-bold text-destructive underline underline-offset-2 hover:text-destructive/90"
+              >
+                Open Goals I judge
+              </Link>
+            </div>
+          )}
 
           {activeStakesCount > 0 && (
             <div
@@ -306,26 +353,31 @@ export default function Settings() {
             </div>
           )}
 
-          <p className="text-center text-xs font-medium uppercase tracking-widest text-muted-foreground/80">
-            Hold to accept
-          </p>
-          <AlertDialogFooter className="gap-2 sm:gap-2">
-            <AlertDialogCancel disabled={loading} className="mt-0 sm:mt-0">
-              Cancel
+          {!accountDeletionBlockedByJudgeRole && (
+            <p className="text-center text-xs font-medium uppercase tracking-widest text-muted-foreground/80">
+              Hold to accept
+            </p>
+          )}
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel
+              disabled={loading}
+              className="mt-0 sm:mt-0 rounded-xl font-display font-semibold"
+            >
+              {activeStakedJudgeCommitmentCount > 0 && !judgeGoalsLoading ? 'Close' : 'Cancel'}
             </AlertDialogCancel>
             {loading ? (
               <Button
                 type="button"
                 variant="destructive"
                 disabled
-                className="w-full sm:w-auto"
+                className="w-full sm:w-auto rounded-xl font-display font-bold relative overflow-hidden transition-all duration-300 ease-in-out"
               >
                 Deleting…
               </Button>
-            ) : (
+            ) : accountDeletionBlockedByJudgeRole ? null : (
               <HoldToConfirmButton
                 variant="destructive"
-                className="w-full sm:w-auto"
+                className="w-full sm:w-auto rounded-xl font-display font-bold relative overflow-hidden transition-all duration-300 ease-in-out"
                 idleLabel="Yes, delete my account"
                 holdingLabel="Sure?"
                 onConfirm={() => confirmDeleteAccount()}

@@ -7,6 +7,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Plus } from 'lucide-react';
 import { TutorialCard, TutorialStepDots } from '@/components/TutorialCard';
 import { useAppTutorial } from '@/hooks/useAppTutorial';
 
@@ -17,6 +18,7 @@ export function AppTutorialChrome({ onCloseCreateSheet }: { onCloseCreateSheet: 
     fabSpotlight,
     onWelcomeContinue,
     goBackToWelcomeFromFab,
+    goBackFromTabGoalsToSheet,
     advanceTabTour,
     goBackTabTour,
     exitTutorial,
@@ -49,7 +51,11 @@ export function AppTutorialChrome({ onCloseCreateSheet }: { onCloseCreateSheet: 
               asChild
               className="text-center text-base font-medium leading-relaxed text-pretty text-foreground sm:text-lg"
             >
-              <p>We want to help you fulfill your goals by fully committing. Let&apos;s show you how it goes.</p>
+              <p>
+                We want to help you fulfill your goals by fully committing.
+                <br />
+                Let&apos;s show you how it goes.
+              </p>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="!flex-row w-full sm:justify-stretch">
@@ -79,7 +85,10 @@ export function AppTutorialChrome({ onCloseCreateSheet }: { onCloseCreateSheet: 
                 body={
                   <p className="text-pretty">
                     <span className="text-foreground">Let&apos;s start with how to create a goal.</span> Tap the{' '}
-                    <span className="text-primary font-semibold">+</span> button below.
+                    <span className="mx-1 inline-flex h-5 w-5 items-center justify-center rounded-[6.5px] bg-primary align-[-0.125rem] glow-primary">
+                      <Plus className="h-3 w-3 text-primary-foreground" />
+                    </span>{' '}
+                    button below.
                   </p>
                 }
                 exitPlacement="top-right"
@@ -107,7 +116,7 @@ export function AppTutorialChrome({ onCloseCreateSheet }: { onCloseCreateSheet: 
               exitPlacement="top-right"
               primaryLabel="Continue"
               onPrimary={advanceTabTour}
-              onGoBack={goBackTabTour}
+              onGoBack={() => void goBackFromTabGoalsToSheet()}
               onExit={() => void handleExit()}
               progressCurrent={progressCurrent}
               progressTotal={progressTotal}

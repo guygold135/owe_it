@@ -6,15 +6,17 @@ import { supabase } from '@/integrations/supabase/client';
 import UserProfilePopover from '@/components/UserProfilePopover';
 import { useAuth } from '@/hooks/useAuth';
 import { useFriendsData } from '@/hooks/useFriendsData';
+import { useGoals } from '@/hooks/useGoals';
 import { queryKeys } from '@/lib/queryKeys';
 import type { FriendsBundle, ProfileLite } from '@/lib/fetchers/tabData';
+import { formatStakeAmount } from '@/lib/currency';
 import { Check, Copy, Search, Share2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { FriendsPageSkeleton } from '@/components/PageSkeletons';
+import { HoldToConfirmButton } from '@/components/ui/hold-to-confirm-button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -25,6 +27,7 @@ import {
 
 export default function Friends() {
   const { user } = useAuth();
+  const { goals } = useGoals();
   const queryClient = useQueryClient();
   const { friends, incoming, loading } = useFriendsData();
   const [searchCode, setSearchCode] = useState('');
@@ -85,12 +88,43 @@ export default function Friends() {
     }
   };
 
-  const normalizedSearchCode = useMemo(() => searchCode.replace(/\D/g, '').slice(0, 11), [searchCode]);
+  const normalizedSearchQuery = useMemo(() => searchCode.trim(), [searchCode]);
   const inviteUrl = useMemo(() => `${window.location.origin}/auth`, []);
   const searchResultAlreadyFriend = useMemo(
     () => (searchResult ? friends.some((friend) => friend.id === searchResult.id) : false),
     [friends, searchResult],
   );
+  const activeGoalsJudgedByFriend = useMemo(() => {
+    if (!friendToRemove) return [];
+    return goals.filter(
+      (goal) =>
+        goal.status === 'active' &&
+        !goal.judge?.isSelf &&
+        goal.judge?.id === friendToRemove.id,
+    );
+  }, [friendToRemove, goals]);
+  const activeStakedGoalsJudgedByFriend = useMemo(() => {
+    if (!friendToRemove) return [];
+    return goals.filter(
+      (goal) =>
+        goal.status === 'active' &&
+        goal.stake > 0 &&
+        !goal.judge?.isSelf &&
+        goal.judge?.id === friendToRemove.id,
+    );
+  }, [friendToRemove, goals]);
+  const activeGoalsJudgedByFriendCount = activeGoalsJudgedByFriend.length;
+  const activeStakedGoalsJudgedByFriendCount = activeStakedGoalsJudgedByFriend.length;
+  const judgedGoalTitlesText = useMemo(() => {
+    if (activeGoalsJudgedByFriendCount === 0) return '';
+    return activeGoalsJudgedByFriend.map((goal) => `"${goal.title}"`).join(', ');
+  }, [activeGoalsJudgedByFriend, activeGoalsJudgedByFriendCount]);
+  const stakedGoalsDetailsText = useMemo(() => {
+    if (activeStakedGoalsJudgedByFriendCount === 0) return '';
+    return activeStakedGoalsJudgedByFriend
+      .map((goal) => `${goal.title} (${formatStakeAmount(goal.stake, goal.stakeCurrency)})`)
+      .join(', ');
+  }, [activeStakedGoalsJudgedByFriend, activeStakedGoalsJudgedByFriendCount]);
 
   const shareInviteLink = async () => {
     const shareText = myFriendCode
@@ -128,16 +162,19 @@ export default function Friends() {
   const doSearch = async () => {
     setSearchError(null);
     setSearchResult(null);
-    if (normalizedSearchCode.length !== 11) {
-      setSearchError('Enter an 11-digit Account ID.');
+    if (!normalizedSearchQuery) {
+      setSearchError('Enter an Account ID or username.');
       return;
     }
     setSearching(true);
-    const { data, error } = await supabase
+    const isAccountId = /^\d{11}$/.test(normalizedSearchQuery);
+    const query = supabase
       .from('profiles')
       .select('id, display_name, avatar_url, friend_code')
-      .eq('friend_code', normalizedSearchCode)
-      .maybeSingle();
+      .limit(1);
+    const { data, error } = isAccountId
+      ? await query.eq('friend_code', normalizedSearchQuery).maybeSingle()
+      : await query.ilike('display_name', normalizedSearchQuery).maybeSingle();
     setSearching(false);
 
     if (error) {
@@ -151,7 +188,7 @@ export default function Friends() {
       return;
     }
     if (!data) {
-      setSearchError('No user found with that Account ID.');
+      setSearchError(isAccountId ? 'No user found with that Account ID.' : 'No user found with that username.');
       return;
     }
     setSearchResult({
@@ -163,10 +200,10 @@ export default function Friends() {
   };
 
   const sendRequest = async () => {
-    if (!normalizedSearchCode || normalizedSearchCode.length !== 11 || searchResultAlreadyFriend) return;
+    if (!searchResult?.id || searchResultAlreadyFriend) return;
     setSending(true);
     setSearchError(null);
-    const { error } = await supabase.rpc('send_friend_request_by_code', { p_to_friend_code: normalizedSearchCode });
+    const { error } = await supabase.rpc('send_friend_request_to_user', { p_to_user_id: searchResult.id });
     setSending(false);
     if (error) {
       setSearchError(error.message || 'Could not send request.');
@@ -343,7 +380,7 @@ export default function Friends() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <h4 className="font-display font-semibold text-foreground">Add a friend</h4>
-              <p className="text-xs text-muted-foreground mt-0.5">search by account id</p>
+              <p className="text-xs text-muted-foreground mt-0.5">search by account id or username</p>
             </div>
           </div>
 
@@ -356,8 +393,7 @@ export default function Friends() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void doSearch();
                 }}
-                inputMode="numeric"
-                placeholder=""
+                placeholder="Account ID or username"
                 className="w-full bg-muted rounded-2xl pl-11 pr-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary [color-scheme:dark]"
               />
             </div>
@@ -496,24 +532,46 @@ export default function Friends() {
         <AlertDialogContent className="max-w-md rounded-2xl border-border">
           <AlertDialogHeader>
             <AlertDialogTitle className="font-display">Remove friend?</AlertDialogTitle>
-            <AlertDialogDescription className="text-center text-muted-foreground">
-              {friendToRemove ? `${friendToRemove.name} will be removed from your friends list.` : 'This friend will be removed.'}
+            <AlertDialogDescription className="text-left text-muted-foreground space-y-2">
+              <p>
+                {friendToRemove
+                  ? `${friendToRemove.name} will be removed from your friends list.`
+                  : 'This friend will be removed.'}
+              </p>
+              {activeGoalsJudgedByFriendCount > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-destructive font-semibold">
+                    They are currently judging {activeGoalsJudgedByFriendCount} active goal
+                    {activeGoalsJudgedByFriendCount === 1 ? '' : 's'}:
+                    {' '}
+                    {judgedGoalTitlesText}.
+                    Removing them will mark those goal
+                    {activeGoalsJudgedByFriendCount === 1 ? '' : 's'} as uncompleted.
+                  </p>
+                  {activeStakedGoalsJudgedByFriendCount > 0 ? (
+                    <p className="text-destructive/90 text-sm">
+                      Stakes that will be charged: {stakedGoalsDetailsText}.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <p className="text-center text-xs font-medium uppercase tracking-widest text-muted-foreground/80">
+            Hold to accept
+          </p>
           <AlertDialogFooter className="gap-2 sm:gap-2">
             <AlertDialogCancel className="rounded-xl font-display font-semibold mt-0 sm:mt-0" disabled={Boolean(removingFriendId)}>
               Cancel
             </AlertDialogCancel>
-            <AlertDialogAction
-              className="w-full sm:w-auto rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 font-display font-bold"
+            <HoldToConfirmButton
+              variant="destructive"
+              className="w-full sm:w-auto rounded-xl font-display font-bold"
               disabled={Boolean(removingFriendId)}
-              onClick={(e) => {
-                e.preventDefault();
-                void removeFriend();
-              }}
-            >
-              {removingFriendId ? 'Removing…' : 'Remove friend'}
-            </AlertDialogAction>
+              idleLabel={removingFriendId ? 'Removing…' : 'Remove friend'}
+              holdingLabel="Sure?"
+              onConfirm={() => removeFriend()}
+            />
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -143,6 +143,15 @@
     50% { border-color: hsl(var(--warning) / 0.7); }
   }
 
+  @keyframes pulse-border-accent {
+    0%, 100% { border-color: hsl(var(--goal-border-accent) / 0.38); }
+    50% { border-color: hsl(var(--goal-border-accent) / 0.85); }
+  }
+
+  .animate-pulse-border-accent {
+    animation: pulse-border-accent 3s ease-in-out infinite;
+  }
+
   @keyframes pop-in {
     0% {
       transform: scale(0.6);

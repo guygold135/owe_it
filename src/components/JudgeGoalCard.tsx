@@ -237,24 +237,42 @@ export function JudgeGoalCard({ goal, onResolved }: JudgeGoalCardProps) {
                 {confirmDescription}
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <p className="text-center text-xs font-medium uppercase tracking-widest text-muted-foreground/80">
-              Hold to accept
-            </p>
+            {goal.stake > 0 && (
+              <p className="text-center text-xs font-medium uppercase tracking-widest text-muted-foreground/80">
+                Hold to accept
+              </p>
+            )}
             <AlertDialogFooter className="gap-2 sm:gap-0">
               <AlertDialogCancel className="mt-0 rounded-xl font-display font-semibold">Cancel</AlertDialogCancel>
-              <HoldToConfirmButton
-                className={
-                  confirmOutcome === 'failed'
-                    ? 'rounded-xl font-display font-bold bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                    : 'rounded-xl font-display font-bold'
-                }
-                idleLabel={confirmOutcome === 'completed' ? 'Yes, completed' : 'Yes, not completed'}
-                holdingLabel="Sure?"
-                onConfirm={() => {
-                  const o = confirmOutcome;
-                  if (o) return handleResolve(o);
-                }}
-              />
+              {goal.stake > 0 ? (
+                <HoldToConfirmButton
+                  className={
+                    confirmOutcome === 'failed'
+                      ? 'rounded-xl font-display font-bold bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                      : 'rounded-xl font-display font-bold'
+                  }
+                  idleLabel={confirmOutcome === 'completed' ? 'Yes, completed' : 'Yes, not completed'}
+                  holdingLabel="Sure?"
+                  onConfirm={() => {
+                    const o = confirmOutcome;
+                    if (o) return handleResolve(o);
+                  }}
+                />
+              ) : (
+                <Button
+                  className={
+                    confirmOutcome === 'failed'
+                      ? 'rounded-xl font-display font-bold bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                      : 'rounded-xl font-display font-bold'
+                  }
+                  onClick={() => {
+                    const o = confirmOutcome;
+                    if (o) return handleResolve(o);
+                  }}
+                >
+                  {confirmOutcome === 'completed' ? 'Yes, completed' : 'Yes, not completed'}
+                </Button>
+              )}
             </AlertDialogFooter>
           </>
         ) : (

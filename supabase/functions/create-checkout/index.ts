@@ -31,15 +31,29 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+function errorMessage(err: unknown, fallback: string): string {
+  if (typeof err === "string" && err.trim()) return err;
+  if (err && typeof err === "object") {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === "string" && msg.trim()) return msg;
+  }
+  return fallback;
+}
+
 /** Returns authenticated user id or null; use when JWT verification is OFF (auth in code). */
 async function getAuthenticatedUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ") || !supabaseUrl || !supabaseAnonKey) return null;
+  if (!authHeader?.startsWith("Bearer ") || !supabaseUrl) return null;
   const token = authHeader.slice(7);
-  const authClient = createClient(supabaseUrl, supabaseAnonKey);
-  const { data: { user }, error } = await authClient.auth.getUser(token);
-  if (error || !user?.id) return null;
-  return user.id;
+  const keysToTry = [supabaseAnonKey, supabaseServiceKey].filter(
+    (key): key is string => typeof key === "string" && key.length > 0,
+  );
+  for (const key of keysToTry) {
+    const authClient = createClient(supabaseUrl, key);
+    const { data: { user }, error } = await authClient.auth.getUser(token);
+    if (!error && user?.id) return user.id;
+  }
+  return null;
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -142,22 +156,42 @@ serve(async (req: Request): Promise<Response> => {
         : null;
 
       if (!customerId) {
-        const customer = await stripe.customers.create({
-          metadata: {
-            app_user_id: userId,
-          },
-        });
-        customerId = customer.id;
-        await stripe.paymentMethods.attach(paymentMethodId, {
-          customer: customerId,
-        });
+        try {
+          const customer = await stripe.customers.create({
+            metadata: {
+              app_user_id: userId,
+            },
+          });
+          customerId = customer.id;
+          await stripe.paymentMethods.attach(paymentMethodId, {
+            customer: customerId,
+          });
+        } catch (attachErr) {
+          return jsonResponse(
+            {
+              error: errorMessage(attachErr, "Could not attach payment method to a Stripe customer"),
+              stage: "attach_payment_method",
+            },
+            500,
+          );
+        }
       }
 
-      await stripe.customers.update(customerId, {
-        invoice_settings: {
-          default_payment_method: paymentMethodId,
-        },
-      });
+      try {
+        await stripe.customers.update(customerId, {
+          invoice_settings: {
+            default_payment_method: paymentMethodId,
+          },
+        });
+      } catch (customerUpdateErr) {
+        return jsonResponse(
+          {
+            error: errorMessage(customerUpdateErr, "Could not update the Stripe customer"),
+            stage: "update_customer",
+          },
+          500,
+        );
+      }
 
       // Best-effort validation for future off-session usage.
       // Don't block goal creation if additional authentication is required now.
@@ -186,7 +220,12 @@ serve(async (req: Request): Promise<Response> => {
 
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-      let insertPayload: Record<string, unknown> = {
+      const buildInsertPayload = (opts?: {
+        includeCurrency?: boolean;
+        includeCharity?: boolean;
+        includeJudgeUserId?: boolean;
+        includeDeferredPaymentFields?: boolean;
+      }): Record<string, unknown> => ({
         user_id: userId,
         title: goalTitle,
         description: description ?? "",
@@ -194,27 +233,105 @@ serve(async (req: Request): Promise<Response> => {
         deadline: deadline,
         status: "active",
         judge_name: judgeName ?? null,
-        judge_user_id: judgeUserId ?? null,
+        ...(opts?.includeJudgeUserId === false ? {} : { judge_user_id: judgeUserId ?? null }),
         is_private: !!isPrivate,
-        stake_currency: normalizedCurrency,
-        stripe_customer_id: customerId,
-        payment_method_id: paymentMethodId,
-        payment_status: "stored_for_later_capture",
-        charity_id: charityId,
-      };
+        ...(opts?.includeCurrency === false ? {} : { stake_currency: normalizedCurrency }),
+        ...(opts?.includeDeferredPaymentFields === false
+          ? {}
+          : {
+              stripe_customer_id: customerId,
+              payment_method_id: paymentMethodId,
+              payment_status: "stored_for_later_capture",
+            }),
+        ...(opts?.includeCharity === false ? {} : { charity_id: charityId }),
+      });
 
       let { data: goal, error: insertError } = await supabase
         .from("goals")
-        .insert(insertPayload)
+        .insert(
+          buildInsertPayload({
+            includeCurrency: true,
+            includeCharity: true,
+            includeJudgeUserId: true,
+            includeDeferredPaymentFields: true,
+          }),
+        )
         .select("id")
         .single();
 
+      const insertErrorMessage = String(insertError?.message ?? "").toLowerCase();
+      if (insertError && insertErrorMessage.includes("charity_id")) {
+        const retry = await supabase
+          .from("goals")
+          .insert(
+            buildInsertPayload({
+              includeCurrency: true,
+              includeCharity: false,
+              includeJudgeUserId: true,
+              includeDeferredPaymentFields: true,
+            }),
+          )
+          .select("id")
+          .single();
+        goal = retry.data;
+        insertError = retry.error;
+      }
+
+      const insertErrorMessageAfterCharity = String(insertError?.message ?? "").toLowerCase();
+      if (insertError && insertErrorMessageAfterCharity.includes("stake_currency")) {
+        const retry = await supabase
+          .from("goals")
+          .insert(
+            buildInsertPayload({
+              includeCurrency: false,
+              includeCharity: false,
+              includeJudgeUserId: true,
+              includeDeferredPaymentFields: true,
+            }),
+          )
+          .select("id")
+          .single();
+        goal = retry.data;
+        insertError = retry.error;
+      }
+
+      const insertErrorMessageAfterCurrency = String(insertError?.message ?? "").toLowerCase();
+      if (insertError && insertErrorMessageAfterCurrency.includes("judge_user_id")) {
+        const retry = await supabase
+          .from("goals")
+          .insert(
+            buildInsertPayload({
+              includeCurrency: false,
+              includeCharity: false,
+              includeJudgeUserId: false,
+              includeDeferredPaymentFields: true,
+            }),
+          )
+          .select("id")
+          .single();
+        goal = retry.data;
+        insertError = retry.error;
+      }
+
+      const insertErrorMessageAfterJudge = String(insertError?.message ?? "").toLowerCase();
       if (
         insertError &&
-        String(insertError.message ?? "").toLowerCase().includes("charity_id")
+        (insertErrorMessageAfterJudge.includes("payment_method_id") ||
+          insertErrorMessageAfterJudge.includes("stripe_customer_id") ||
+          insertErrorMessageAfterJudge.includes("payment_status"))
       ) {
-        const { charity_id: _c, ...withoutCharity } = insertPayload;
-        const retry = await supabase.from("goals").insert(withoutCharity).select("id").single();
+        const retry = await supabase
+          .from("goals")
+          .insert(
+            buildInsertPayload({
+              includeCurrency: false,
+              includeCharity: false,
+              includeJudgeUserId: false,
+              includeDeferredPaymentFields: false,
+            }),
+          )
+          .select("id")
+          .single();
         goal = retry.data;
         insertError = retry.error;
       }
@@ -229,7 +346,10 @@ serve(async (req: Request): Promise<Response> => {
         }
         console.error("Goal insert error:", insertError.message);
         return jsonResponse(
-          { error: "Payment method saved but goal could not be saved" },
+          {
+            error: errorMessage(insertError, "Payment method saved but goal could not be saved"),
+            stage: "insert_goal",
+          },
           500
         );
       }
@@ -291,7 +411,7 @@ serve(async (req: Request): Promise<Response> => {
   } catch (err: any) {
     console.error("Stripe error:", err?.message ?? err);
     return jsonResponse(
-      { error: err?.message ?? "Unknown Stripe error" },
+      { error: err?.message ?? "Unknown Stripe error", stage: "unexpected" },
       500
     );
   }

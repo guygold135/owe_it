@@ -102,6 +102,32 @@ serve(async (req: Request): Promise<Response> => {
 
     const admin = createClient(supabaseUrl, supabaseServiceKey);
 
+    const { data: judgeBlockers, error: judgeBlockersError } = await admin
+      .from("goals")
+      .select("id")
+      .eq("judge_user_id", userId)
+      .neq("user_id", userId)
+      .eq("status", "active")
+      .gt("stake", 0)
+      .limit(1);
+
+    if (judgeBlockersError) {
+      console.error("delete-account judge blocker check:", judgeBlockersError.message);
+      return jsonResponse(
+        { error: "Could not verify judge commitments. Try again in a moment." },
+        500,
+      );
+    }
+    if (judgeBlockers && judgeBlockers.length > 0) {
+      return jsonResponse(
+        {
+          error:
+            "You are still the judge on an active staked goal owned by someone else. Finish judging those goals first, then try again.",
+        },
+        409,
+      );
+    }
+
     const purge = await purgePublicUserData(admin, userId);
     if (purge.error) {
       console.error("delete-account purge failed:", purge.error);

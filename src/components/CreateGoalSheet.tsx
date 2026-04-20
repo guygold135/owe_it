@@ -206,6 +206,93 @@ function CardStepContinueButton({ onPaymentMethodReady }: { onPaymentMethodReady
   );
 }
 
+async function getFunctionInvokeErrorMessage(error: unknown, fallback: string): Promise<string> {
+  if (error && typeof error === 'object') {
+    const maybeContext = (error as { context?: Response }).context;
+    if (maybeContext instanceof Response) {
+      try {
+        const payload = await maybeContext.clone().json() as { error?: unknown; stage?: unknown };
+        const message = typeof payload.error === 'string' && payload.error.trim() ? payload.error.trim() : null;
+        const stage = typeof payload.stage === 'string' && payload.stage.trim() ? payload.stage.trim() : null;
+        if (message && stage) return `${message} (${stage})`;
+        if (message) return message;
+      } catch {
+        try {
+          const text = await maybeContext.clone().text();
+          if (text.trim()) return text.trim();
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+  }
+
+  return fallback;
+}
+
+async function callCreateCheckoutWithSession(body: Record<string, unknown>) {
+  const { error: userError } = await supabase.auth.getUser();
+  if (userError) {
+    throw new Error(userError.message ?? 'Not authenticated.');
+  }
+
+  let {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+  if (sessionError) {
+    console.error('Could not read auth session before create-checkout', sessionError);
+  }
+  if (!session?.access_token) {
+    const refreshResult = await supabase.auth.refreshSession();
+    session = refreshResult.data.session;
+    if (refreshResult.error) {
+      console.error('Could not refresh auth session before create-checkout', refreshResult.error);
+    }
+  }
+
+  const accessToken = String(session?.access_token ?? '').trim().replace(/^Bearer\s+/i, '');
+  if (!accessToken) {
+    throw new Error('Your session expired. Please sign in again and try creating the goal.');
+  }
+  if (!accessToken.includes('.')) {
+    throw new Error('Your auth token is invalid. Please sign out and sign in again.');
+  }
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  const apikey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+  if (!supabaseUrl || !apikey) {
+    throw new Error('Supabase environment is missing in the app.');
+  }
+
+  const res = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/create-checkout`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      apikey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const raw = await res.text();
+  let parsed: { success?: boolean; error?: string; goalId?: string } | null = null;
+  try {
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+
+  if (!res.ok) {
+    throw new Error(parsed?.error ?? raw?.trim() ?? `create-checkout failed with status ${res.status}.`);
+  }
+
+  return parsed;
+}
+
 export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const {
     tutorialActive,
@@ -252,13 +339,19 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   /** Full-sheet overlay on sign step: spinner until API done, then success morph. */
   const [signOverlayPhase, setSignOverlayPhase] = useState<'idle' | 'loading' | 'success'>('idle');
   const judgeRequestIdRef = useRef<string | null>(null);
+  const judgeRequestRowSeenRef = useRef(false);
   const stakeRef = useRef(stake);
   const createdGoalIdRef = useRef<string | null>(null);
+  const preserveDraftOnNextCloseRef = useRef(false);
   /** judge-wait dialog: full sheet close (X/backdrop) vs return to judge picker (Back button) */
   const judgeWaitDismissRef = useRef<'sheet' | 'back-to-picker'>('sheet');
 
   useEffect(() => {
     judgeRequestIdRef.current = judgeRequestId;
+  }, [judgeRequestId]);
+
+  useEffect(() => {
+    judgeRequestRowSeenRef.current = false;
   }, [judgeRequestId]);
 
   useEffect(() => {
@@ -441,25 +534,25 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     };
   }, [open, user?.id, loadFriends]);
 
-  const normalizedJudgeByIdCode = useMemo(
-    () => judgeByIdInput.replace(/\D/g, '').slice(0, 11),
-    [judgeByIdInput],
-  );
+  const normalizedJudgeLookup = useMemo(() => judgeByIdInput.trim(), [judgeByIdInput]);
 
   const searchJudgeByFriendId = useCallback(async () => {
     setJudgeByIdError(null);
     setJudgeByIdResult(null);
     if (!user?.id) return;
-    if (normalizedJudgeByIdCode.length !== 11) {
-      setJudgeByIdError('Enter an 11-digit Account ID.');
+    if (!normalizedJudgeLookup) {
+      setJudgeByIdError('Enter an Account ID or username.');
       return;
     }
     setJudgeByIdSearching(true);
-    const { data, error } = await supabase
+    const isAccountId = /^\d{11}$/.test(normalizedJudgeLookup);
+    const query = supabase
       .from('profiles')
       .select('id, display_name, avatar_url, friend_code')
-      .eq('friend_code', normalizedJudgeByIdCode)
-      .maybeSingle();
+      .limit(1);
+    const { data, error } = isAccountId
+      ? await query.eq('friend_code', normalizedJudgeLookup).maybeSingle()
+      : await query.ilike('display_name', normalizedJudgeLookup).maybeSingle();
     setJudgeByIdSearching(false);
 
     if (error) {
@@ -473,7 +566,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       return;
     }
     if (!data) {
-      setJudgeByIdError('No user found with that Account ID.');
+      setJudgeByIdError(isAccountId ? 'No user found with that Account ID.' : 'No user found with that username.');
       return;
     }
     const row = data as any;
@@ -487,13 +580,13 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       avatar_url: row.avatar_url ?? null,
       friend_code: row.friend_code ?? null,
     });
-  }, [normalizedJudgeByIdCode, user?.id]);
+  }, [normalizedJudgeLookup, user?.id]);
 
   const sendJudgeByIdFriendRequest = useCallback(async () => {
-    if (normalizedJudgeByIdCode.length !== 11) return;
+    if (!judgeByIdResult?.id) return;
     setJudgeByIdSending(true);
     setJudgeByIdError(null);
-    const { error } = await supabase.rpc('send_friend_request_by_code', { p_to_friend_code: normalizedJudgeByIdCode });
+    const { error } = await supabase.rpc('send_friend_request_to_user', { p_to_user_id: judgeByIdResult.id });
     setJudgeByIdSending(false);
     if (error) {
       setJudgeByIdError(error.message || 'Could not send request.');
@@ -503,7 +596,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     setJudgeByIdInput('');
     toast.success('Friend request sent. Once they accept, they’ll appear in your list.');
     void loadFriends();
-  }, [normalizedJudgeByIdCode, loadFriends]);
+  }, [judgeByIdResult?.id, loadFriends]);
 
   const selectJudgeFromLookup = useCallback((profile: ProfileLite) => {
     setJudge({
@@ -520,40 +613,64 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   useEffect(() => {
     if (!judgeRequestId) return;
 
+    const finishJudgeWait = (status: 'accepted' | 'ignored' | 'cancelled' | 'missing') => {
+      setJudgeRequestId(null);
+      setWaitingJudgeName(null);
+
+      if (status === 'accepted' || status === 'missing') {
+        setStep(stakeRef.current > 0 ? 3 : 4);
+        return;
+      }
+
+      if (status === 'ignored') {
+        toast.error('Judge request was ignored.');
+        return;
+      }
+    };
+
+    const checkJudgeRequestStatus = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('judge_requests')
+          .select('status')
+          .eq('id', judgeRequestIdRef.current)
+          .maybeSingle();
+
+        if (error) return;
+        if (!data) {
+          // Some backend flows remove the row before the requester receives the final
+          // accepted update. If we previously saw the row, treat disappearance as the
+          // successful path instead of trapping the user on this screen.
+          if (judgeRequestRowSeenRef.current) finishJudgeWait('missing');
+          return;
+        }
+
+        judgeRequestRowSeenRef.current = true;
+        const status = (data as { status?: string })?.status;
+        if (status === 'accepted') {
+          finishJudgeWait('accepted');
+          return;
+        }
+        if (status === 'ignored') {
+          finishJudgeWait('ignored');
+          return;
+        }
+        if (status === 'cancelled') {
+          finishJudgeWait('cancelled');
+        }
+      } catch {
+        // ignore
+      }
+    };
+
     /**
      * Poll: never clear state on !data — that races realtime and tears down the channel before
      * UPDATE/DELETE events arrive (accept used to be UPDATE+DELETE in one tx; poll saw the row gone first).
      * Unfiltered postgres_changes + client filter: filtered UUID subscriptions are unreliable in Supabase.
      */
-    const poll = window.setInterval(async () => {
-      try {
-        const { data, error } = await supabase
-          .from('judge_requests')
-          .select('status')
-          .eq('id', judgeRequestId)
-          .maybeSingle();
-        if (error) return;
-        if (!data) return;
-        const status = (data as { status?: string })?.status;
-        if (status === 'accepted') {
-          setJudgeRequestId(null);
-          setWaitingJudgeName(null);
-          setStep(stakeRef.current > 0 ? 3 : 4);
-          return;
-        }
-        if (status === 'ignored') {
-          setJudgeRequestId(null);
-          setWaitingJudgeName(null);
-          toast.error('Judge request was ignored.');
-          return;
-        }
-        if (status === 'cancelled') {
-          setJudgeRequestId(null);
-          setWaitingJudgeName(null);
-        }
-      } catch {
-        // ignore
-      }
+    void checkJudgeRequestStatus();
+    const poll = window.setInterval(() => {
+      void checkJudgeRequestStatus();
     }, 1500);
 
     const channel = supabase
@@ -570,20 +687,15 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
           if (row.id !== judgeRequestIdRef.current) return;
           const status = row.status;
           if (status === 'accepted') {
-            setJudgeRequestId(null);
-            setWaitingJudgeName(null);
-            setStep(stakeRef.current > 0 ? 3 : 4);
+            finishJudgeWait('accepted');
             return;
           }
           if (status === 'ignored') {
-            setJudgeRequestId(null);
-            setWaitingJudgeName(null);
-            toast.error('Judge request was ignored.');
+            finishJudgeWait('ignored');
             return;
           }
           if (status === 'cancelled') {
-            setJudgeRequestId(null);
-            setWaitingJudgeName(null);
+            finishJudgeWait('cancelled');
           }
         },
       )
@@ -598,15 +710,11 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
           const oldRow = payload.old as { id?: string; status?: string } | undefined;
           if (oldRow?.id !== judgeRequestIdRef.current) return;
           if (oldRow.status === 'accepted') {
-            setJudgeRequestId(null);
-            setWaitingJudgeName(null);
-            setStep(stakeRef.current > 0 ? 3 : 4);
+            finishJudgeWait('accepted');
             return;
           }
           if (oldRow.status === 'pending') {
-            setJudgeRequestId(null);
-            setWaitingJudgeName(null);
-            // e.g. cancel_pending_judge_requests_before_cutoff DELETE — silent
+            finishJudgeWait('cancelled');
           }
         },
       )
@@ -640,13 +748,17 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   /** Closing the sheet = abandoning goal creation → cancel pending judge request for the judge */
   useEffect(() => {
     if (open) return;
+    const preserveDraft = preserveDraftOnNextCloseRef.current;
+    preserveDraftOnNextCloseRef.current = false;
     const pendingId = judgeRequestIdRef.current;
     if (pendingId) {
       void supabase.rpc('cancel_judge_request', { p_request_id: pendingId }).then(({ error }) => {
         if (error) console.error('Cancel judge request on close', error);
       });
     }
-    reset();
+    if (!preserveDraft) {
+      reset();
+    }
   }, [open]);
 
   const handleClose = () => {
@@ -816,7 +928,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
         return (
           <p className="text-pretty">
             On this page you define your goal&apos;s name, requirements, deadline - everything that defines what
-            &quot;done&quot; means, and visibility.
+            &quot;done&quot; means, and visibility for your friends.
           </p>
         );
       case 'sheet_stake':
@@ -828,7 +940,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               will be charged and transferred to your selected charity. If you complete it in time, nothing will be
               charged.
             </p>
-            <p className="text-pretty">For the tutorial will choose the free option.</p>
+            <p className="text-pretty">
+              For the tutorial we will choose no stake ({formatStakeAmount(0, stakeCurrency)}).
+            </p>
           </>
         );
       case 'sheet_judge':
@@ -915,29 +1029,42 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       throw new Error('Payment method or user missing.');
     }
 
-    const { data, error } = await supabase.functions.invoke('create-checkout', {
-      body: {
-        paymentMethodId,
-        userId: user.id,
-        goalTitle: title,
-        description,
-        deadline: new Date(deadline).toISOString(),
-        judgeName: judge?.isSelf ? null : judge?.name,
-        judgeUserId: judge?.isSelf ? user.id : judge?.id,
-        isPrivate,
-        amount: amountStripeUnits,
-        currency: stakeCurrency,
-        charityId: selectedCharityId,
-      },
-    });
+    const requestBody = {
+      paymentMethodId,
+      userId: user.id,
+      goalTitle: title,
+      description,
+      deadline: new Date(deadline).toISOString(),
+      judgeName: judge?.isSelf ? null : judge?.name,
+      judgeUserId: judge?.isSelf ? user.id : judge?.id,
+      isPrivate,
+      amount: amountStripeUnits,
+      currency: stakeCurrency,
+      charityId: selectedCharityId,
+    };
 
-    if (error) {
-      console.error('Error charging card', error);
-      toast.error(data?.error ?? 'Could not save payment method. Goal was not created.');
+    let payload: { success?: boolean; error?: string; goalId?: string } | null = null;
+    let checkoutError: unknown = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        payload = await callCreateCheckoutWithSession(requestBody);
+        checkoutError = null;
+        break;
+      } catch (error) {
+        checkoutError = error;
+        if (attempt === 0) {
+          console.warn('create-checkout failed, retrying once', error);
+          await new Promise((resolve) => window.setTimeout(resolve, 350));
+        }
+      }
+    }
+
+    if (checkoutError) {
+      console.error('Error charging card', checkoutError);
+      toast.error(await getFunctionInvokeErrorMessage(checkoutError, 'Could not save payment method. Goal was not created.'));
       throw new Error('checkout');
     }
 
-    const payload = data as { success?: boolean; error?: string; goalId?: string };
     if (!payload?.success) {
       toast.error(payload?.error ?? 'Could not prepare payment for later charge. Goal was not created.');
       throw new Error('payment failed');
@@ -1477,17 +1604,17 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                             <UserPlus className="h-4 w-4 text-muted-foreground" aria-hidden />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-display font-semibold text-foreground">Add by Account ID</p>
+                            <p className="text-sm font-display font-semibold text-foreground">Add a friend</p>
                             <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
-                              Find someone by their 11-digit ID. They must accept your friend request before you can invite
-                              them as judge.
+                              Find someone by Account ID or username. They must accept your friend request before you can
+                              invite them as judge.
                             </p>
                           </div>
                         </div>
                         <div className="flex gap-2">
                           <input
                             type="text"
-                            inputMode="numeric"
+                            inputMode="text"
                             autoComplete="off"
                             value={judgeByIdInput}
                             onChange={(e) => {
@@ -1497,7 +1624,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') void searchJudgeByFriendId();
                             }}
-                            placeholder="11-digit Account ID"
+                            placeholder="Account ID or username"
                             className="min-w-0 flex-1 rounded-xl bg-background/60 px-3 py-2.5 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary [color-scheme:dark]"
                           />
                           <button
@@ -1560,10 +1687,6 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               {step === 3 && tutorialCreateFlowActive && (
                 <div className="flex flex-col flex-1 min-h-0">
                   <div className="space-y-6 flex-1">
-                    <p className="text-sm text-muted-foreground">
-                      Tutorial preview: this is where card details are entered for paid stakes. Since this tutorial uses a
-                      free stake, no card input is required.
-                    </p>
                     <div className="rounded-2xl border border-border bg-muted/30 p-4">
                       <p className="text-sm font-display font-semibold text-foreground">Card details preview</p>
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -1688,6 +1811,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       onPublish={performSign}
                       onSuccess={() => {
                         if (tutorialActive && isAppTutorialSheetPhase(tutorialPhase)) {
+                          preserveDraftOnNextCloseRef.current = true;
                           onGoalCreatedInTutorial(createdGoalIdRef.current);
                         }
                         createdGoalIdRef.current = null;

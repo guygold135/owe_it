@@ -41,6 +41,8 @@ type AppTutorialContextValue = {
   goBackToWelcomeFromFab: () => void;
   /** Close the create sheet flow and return to the FAB spotlight step. */
   goBackToFabFromSheet: () => void;
+  /** From tab_goals in tutorial: undo created tutorial goal and reopen the sheet on previous step. */
+  goBackFromTabGoalsToSheet: () => Promise<void>;
   onFabPhaseCreateOpened: () => void;
   onGoalCreatedInTutorial: (goalId?: string | null) => void;
   advanceTabTour: () => void;
@@ -67,6 +69,7 @@ export function AppTutorialProvider({
   const [phase, setPhase] = useState<AppTutorialPhase>('off');
   const [loadingFlag, setLoadingFlag] = useState(true);
   const [createHadPaidStake, setCreateHadPaidStake] = useState<boolean | null>(null);
+  const [tutorialCreatedGoalId, setTutorialCreatedGoalId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user?.id) {
@@ -179,6 +182,23 @@ export function AppTutorialProvider({
     setPhase('fab');
   }, []);
 
+  const goBackFromTabGoalsToSheet = useCallback(async () => {
+    if (phase !== 'tab_goals') return;
+    if (tutorialCreatedGoalId && user?.id) {
+      const { error } = await supabase
+        .from('goals')
+        .delete()
+        .eq('id', tutorialCreatedGoalId)
+        .eq('user_id', user.id);
+      if (error) {
+        console.error('Could not delete tutorial goal on go back', error);
+      }
+    }
+    setTutorialCreatedGoalId(null);
+    setPhase('sheet_confirm');
+    onRequestOpenCreateGoal();
+  }, [phase, tutorialCreatedGoalId, user?.id, onRequestOpenCreateGoal]);
+
   const onFabPhaseCreateOpened = useCallback(() => {
     if (phase !== 'fab') return;
     setPhase('sheet_goal');
@@ -203,6 +223,7 @@ export function AppTutorialProvider({
   }, [phase]);
 
   const onGoalCreatedInTutorial = useCallback((_goalId?: string | null) => {
+    setTutorialCreatedGoalId(_goalId ?? null);
     setPhase('tab_goals');
     setCreateHadPaidStake(null);
     navigate('/');
@@ -311,6 +332,7 @@ export function AppTutorialProvider({
       onWelcomeContinue,
       goBackToWelcomeFromFab,
       goBackToFabFromSheet,
+      goBackFromTabGoalsToSheet,
       onFabPhaseCreateOpened,
       onGoalCreatedInTutorial,
       advanceTabTour,
@@ -332,6 +354,7 @@ export function AppTutorialProvider({
       onWelcomeContinue,
       goBackToWelcomeFromFab,
       goBackToFabFromSheet,
+      goBackFromTabGoalsToSheet,
       onFabPhaseCreateOpened,
       onGoalCreatedInTutorial,
       advanceTabTour,

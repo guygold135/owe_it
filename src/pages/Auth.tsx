@@ -9,6 +9,29 @@ import { consumeAuthRedirectError } from '@/lib/sessionBootstrap';
 import { APP_LOGO_SRC } from '@/lib/brandAssets';
 import { SmokeBackground } from '@/components/ui/spooky-smoke-animation';
 
+function GoogleLogo({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden className={className}>
+      <path
+        fill="#4285F4"
+        d="M21.805 12.23c0-.68-.055-1.364-.172-2.033H12.24v3.851h5.38a4.6 4.6 0 0 1-1.993 3.022v2.499h3.22c1.89-1.74 2.958-4.31 2.958-7.339Z"
+      />
+      <path
+        fill="#34A853"
+        d="M12.24 21.96c2.687 0 4.953-.882 6.604-2.391l-3.22-2.499c-.896.61-2.052.955-3.384.955-2.6 0-4.803-1.754-5.589-4.113H3.329v2.576c1.69 3.363 5.133 5.472 8.911 5.472Z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M6.651 13.912a5.79 5.79 0 0 1 0-3.701V7.635H3.329a9.72 9.72 0 0 0 0 8.853l3.322-2.576Z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12.24 6.098c1.457 0 2.764.501 3.793 1.484l2.826-2.826c-1.717-1.599-3.983-2.59-6.619-2.59-3.778 0-7.221 2.11-8.911 5.47l3.322 2.577c.786-2.36 2.988-4.115 5.589-4.115Z"
+      />
+    </svg>
+  );
+}
+
 export default function Auth() {
   const { signIn, signUp, signInWithOAuth, sendPasswordResetEmail, resendSignupConfirmation } =
     useAuth();
@@ -19,7 +42,7 @@ export default function Auth() {
   const [displayName, setDisplayName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [oauthLoadingProvider, setOauthLoadingProvider] = useState<'google' | 'apple' | null>(null);
+  const [oauthLoadingProvider, setOauthLoadingProvider] = useState<'google' | null>(null);
   const [resetSending, setResetSending] = useState(false);
   const [resendConfirmBusy, setResendConfirmBusy] = useState(false);
 
@@ -116,7 +139,7 @@ export default function Auth() {
     }
   };
 
-  const handleOAuth = async (provider: 'google' | 'apple') => {
+  const handleOAuth = async (provider: 'google') => {
     setOauthLoadingProvider(provider);
     try {
       await signInWithOAuth(provider);
@@ -276,7 +299,7 @@ export default function Auth() {
 
         <div className="my-6 flex items-center gap-3">
           <div className="h-px flex-1 bg-border" />
-          <span className="text-xs text-muted-foreground">or continue with</span>
+          <span className="text-base font-semibold text-foreground/70">or continue with</span>
           <div className="h-px flex-1 bg-border" />
         </div>
 
@@ -284,20 +307,12 @@ export default function Auth() {
           <Button
             type="button"
             variant="outline"
-            className="w-full h-12 rounded-2xl text-sm font-medium"
+            className="w-full h-12 rounded-2xl text-base font-semibold"
             disabled={oauthLoadingProvider !== null}
             onClick={() => void handleOAuth('google')}
           >
-            {oauthLoadingProvider === 'google' ? 'Connecting to Google...' : 'Continue with Google'}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full h-12 rounded-2xl text-sm font-medium"
-            disabled={oauthLoadingProvider !== null}
-            onClick={() => void handleOAuth('apple')}
-          >
-            {oauthLoadingProvider === 'apple' ? 'Connecting to Apple...' : 'Continue with Apple'}
+            <GoogleLogo />
+            {oauthLoadingProvider === 'google' ? 'Connecting...' : 'Google'}
           </Button>
         </div>
 

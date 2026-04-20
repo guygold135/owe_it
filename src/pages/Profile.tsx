@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import * as React from "react";
 import { motion } from "framer-motion";
-import { Calendar, Camera, CheckCircle2, CircleX, IdCard, Loader2, Mail, Pencil, Trophy, User } from "lucide-react";
+import { Calendar, Camera, CheckCircle2, CircleX, Copy, IdCard, Loader2, Mail, Pencil, Plus, Trophy } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useGoals } from "@/hooks/useGoals";
 import { useGoalsAsJudge } from "@/hooks/useGoalsAsJudge";
@@ -32,8 +32,18 @@ type Achievement = {
   description: string;
   icon: ReactNode;
   progress: number;
-  target: number;
+  level: number;
+  levelGoal: number | null;
+  nextGoal: number;
+  isCurrency?: boolean;
 };
+
+const GOAL_COUNT_MILESTONES = [1, 5, 10, 25, 50, 100] as const;
+const DONATION_MILESTONES = [10, 50, 100, 250, 500, 1000] as const;
+
+const goalLabel = (count: number) => `${count} goal${count === 1 ? "" : "s"}`;
+const formatMilestone = (value: number, isCurrency: boolean) => (isCurrency ? `$${value}` : goalLabel(value));
+const formatUsd = (value: number) => `$${Math.round(value).toLocaleString()}`;
 
 function formatDate(d: Date | null) {
   if (!d) return "—";
@@ -42,6 +52,25 @@ function formatDate(d: Date | null) {
   } catch {
     return String(d);
   }
+}
+
+function JudgeLinkIcon({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" className={className} aria-hidden>
+      <path
+        fill="currentColor"
+        d="M243.32,116.69l-16-16a16,16,0,0,0-20.84-1.53L156.84,49.52a16,16,0,0,0-1.52-20.84l-16-16a16,16,0,0,0-22.63,0l-64,64a16,16,0,0,0,0,22.63l16,16a16,16,0,0,0,20.83,1.52L96.69,124,31.31,189.38A25,25,0,0,0,66.63,224.7L132,159.32l7.17,7.16a16,16,0,0,0,1.52,20.84l16,16a16,16,0,0,0,22.63,0l64-64A16,16,0,0,0,243.32,116.69ZM80,104,64,88l64-64,16,16ZM55.32,213.38a9,9,0,0,1-12.69,0,9,9,0,0,1,0-12.68L108,135.32,120.69,148ZM101,105.66,145.66,61,195,110.34,150.35,155ZM168,192l-16-16,4-4h0l56-56h0l4-4,16,16Z"
+      />
+    </svg>
+  );
+}
+
+function CharityDonationIcon({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 256 256" className={className} aria-hidden>
+      <path d="M230.33,141.06a24.34,24.34,0,0,0-18.61-4.77C230.5,117.33,240,98.48,240,80c0-26.47-21.29-48-47.46-48A47.58,47.58,0,0,0,156,48.75,47.58,47.58,0,0,0,119.46,32C93.29,32,72,53.53,72,80c0,11,3.24,21.69,10.06,33a31.87,31.87,0,0,0-14.75,8.4L44.69,144H16A16,16,0,0,0,0,160v40a16,16,0,0,0,16,16H120a7.93,7.93,0,0,0,1.94-.24l64-16a6.94,6.94,0,0,0,1.19-.4L226,182.82l.44-.2a24.6,24.6,0,0,0,3.93-41.56ZM119.46,48A31.15,31.15,0,0,1,148.6,67a8,8,0,0,0,14.8,0,31.15,31.15,0,0,1,29.14-19C209.59,48,224,62.65,224,80c0,19.51-15.79,41.58-45.66,63.9l-11.09,2.55A28,28,0,0,0,140,112H100.68C92.05,100.36,88,90.12,88,80,88,62.65,102.41,48,119.46,48ZM16,160H40v40H16Zm203.43,8.21-38,16.18L119,200H56V155.31l22.63-22.62A15.86,15.86,0,0,1,89.94,128H140a12,12,0,0,1,0,24H112a8,8,0,0,0,0,16h32a8.32,8.32,0,0,0,1.79-.2l67-15.41.31-.08a8.6,8.6,0,0,1,6.3,15.9Z" />
+    </svg>
+  );
 }
 
 function generateLocalFriendCode() {
@@ -98,7 +127,7 @@ function ProfileInner() {
   const [editSaving, setEditSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
-  const knownEarnedAchievementIdsRef = useRef<Set<string>>(new Set());
+  const knownAchievementLevelsRef = useRef<Map<string, number>>(new Map());
   const initializedAchievementsRef = useRef(false);
 
   useEffect(() => {
@@ -222,6 +251,18 @@ function ProfileInner() {
 
     setEditSaving(true);
     try {
+      const { data: isAvailable, error: availabilityError } = await supabase.rpc("is_display_name_available", {
+        p_display_name: displayNameInput,
+        p_exclude_user_id: user.id,
+      });
+      if (availabilityError) {
+        throw availabilityError;
+      }
+      if (!isAvailable) {
+        toast.error("That username is already taken.");
+        return;
+      }
+
       const payload = {
         display_name: displayNameInput,
       };
@@ -351,6 +392,33 @@ function ProfileInner() {
       .filter((g) => g.status !== "active")
       .reduce((sum, g) => sum + g.stake, 0);
 
+    const ownStakedGoals = goals.filter((g) => g.stake > 0);
+    const ownNonStakedGoals = goals.filter((g) => g.stake <= 0);
+    const stakedCompleted = ownStakedGoals.filter((g) => g.status === "completed").length;
+    const stakedFailed = ownStakedGoals.filter((g) => g.status === "failed").length;
+    const stakedActive = ownStakedGoals.filter((g) => g.status === "active").length;
+    const nonStakedCompleted = ownNonStakedGoals.filter((g) => g.status === "completed").length;
+    const nonStakedFailed = ownNonStakedGoals.filter((g) => g.status === "failed").length;
+    const nonStakedActive = ownNonStakedGoals.filter((g) => g.status === "active").length;
+
+    const stakedResolved = stakedCompleted + stakedFailed;
+    const nonStakedResolved = nonStakedCompleted + nonStakedFailed;
+    const stakedSuccessRate = stakedResolved > 0 ? Math.round((stakedCompleted / stakedResolved) * 100) : null;
+    const nonStakedSuccessRate =
+      nonStakedResolved > 0 ? Math.round((nonStakedCompleted / nonStakedResolved) * 100) : null;
+    const stakedOnTheLine = ownStakedGoals.reduce((sum, g) => sum + g.stake, 0);
+    const stakedSaved = ownStakedGoals
+      .filter((g) => g.status === "completed")
+      .reduce((sum, g) => sum + g.stake, 0);
+    const stakedNotSaved = ownStakedGoals
+      .filter((g) => g.status === "failed")
+      .reduce((sum, g) => sum + g.stake, 0);
+
+    const stakedTotal = stakedCompleted + stakedFailed + stakedActive;
+    const nonStakedTotal = nonStakedCompleted + nonStakedFailed + nonStakedActive;
+
+    const pct = (value: number, total: number) => (total > 0 ? (value / total) * 100 : 0);
+
     return {
       completedGoals,
       failedGoals,
@@ -362,54 +430,127 @@ function ProfileInner() {
       judgeResolved,
       judgeStakedTotal,
       judgeResolvedStaked,
+      stakedCompleted,
+      stakedFailed,
+      stakedActive,
+      stakedResolved,
+      stakedSuccessRate,
+      stakedTotal,
+      stakedOnTheLine,
+      stakedSaved,
+      stakedNotSaved,
+      nonStakedCompleted,
+      nonStakedFailed,
+      nonStakedActive,
+      nonStakedResolved,
+      nonStakedSuccessRate,
+      nonStakedTotal,
+      stakedCompletedPct: pct(stakedCompleted, stakedTotal),
+      stakedFailedPct: pct(stakedFailed, stakedTotal),
+      stakedActivePct: pct(stakedActive, stakedTotal),
+      nonStakedCompletedPct: pct(nonStakedCompleted, nonStakedTotal),
+      nonStakedFailedPct: pct(nonStakedFailed, nonStakedTotal),
+      nonStakedActivePct: pct(nonStakedActive, nonStakedTotal),
     };
   }, [goals, judgeGoals]);
 
   const achievements: Achievement[] = useMemo(() => {
-    const list: Achievement[] = [
-      {
-        id: "first-finish",
-        title: "First Finish",
-        description: "Complete your first goal.",
-        icon: <CheckCircle2 className="w-4 h-4" />,
-        progress: stats.completedGoals,
-        target: 1,
-      },
-      {
-        id: "steady-finisher",
-        title: "Steady Finisher",
-        description: "Complete 5 goals.",
-        icon: <Trophy className="w-4 h-4" />,
-        progress: stats.completedGoals,
-        target: 5,
-      },
-      {
-        id: "resolved-10",
-        title: "Resolution Machine",
-        description: "Resolve 10 goals (completed or failed).",
-        icon: <IdCard className="w-4 h-4" />,
-        progress: stats.resolvedGoals,
-        target: 10,
-      },
-      {
-        id: "first-judge",
-        title: "Trusted Judge",
-        description: "Judge 1 resolved goal.",
-        icon: <User className="w-4 h-4" />,
-        progress: stats.judgeResolved,
-        target: 1,
-      },
-      {
-        id: "judge-mentor",
-        title: "Judge Mentor",
-        description: "Judge 5 resolved goals.",
-        icon: <Trophy className="w-4 h-4" />,
-        progress: stats.judgeResolved,
-        target: 5,
-      },
-    ];
+    const goalsCreated = goals.length;
+    const stakedGoalsCreated = goals.filter((g) => g.stake > 0).length;
+    const goalsCompleted = stats.completedGoals;
+    const stakedGoalsCompleted = goals.filter((g) => g.status === "completed" && g.stake > 0).length;
+    const judgedGoalsResolved = stats.judgeResolved;
+    const judgedStakedGoalsResolved = judgeGoals.filter((g) => g.status !== "active" && g.stake > 0).length;
+    const donatedToCharity = goals
+      .filter((g) => g.status === "failed" && g.stake > 0 && g.charityId != null)
+      .reduce((sum, g) => sum + g.stake, 0);
 
-    return list;
+    const buildProgressAchievement = ({
+      id,
+      title,
+      icon,
+      progress,
+      milestones,
+      isCurrency = false,
+    }: {
+      id: string;
+      title: string;
+      icon: ReactNode;
+      progress: number;
+      milestones: readonly number[];
+      isCurrency?: boolean;
+    }): Achievement => {
+      const level = milestones.filter((m) => progress >= m).length;
+      const nextGoal = milestones[Math.min(level, milestones.length - 1)];
+      const levelGoal = level > 0 ? milestones[level - 1] : null;
+      const description = isCurrency
+        ? "Donate money to charity by failing staked charity goals."
+        : `Progress through ${title.toLowerCase()} milestones.`;
+      return {
+        id,
+        title,
+        description,
+        icon,
+        progress,
+        level,
+        levelGoal,
+        nextGoal,
+        isCurrency,
+      };
+    };
+
+    return [
+      buildProgressAchievement({
+        id: "creating-goals",
+        title: "Creating goals",
+        icon: <Plus className="w-4 h-4" />,
+        progress: goalsCreated,
+        milestones: GOAL_COUNT_MILESTONES,
+      }),
+      buildProgressAchievement({
+        id: "completing-goals",
+        title: "Completing goals",
+        icon: <Trophy className="w-4 h-4" />,
+        progress: goalsCompleted,
+        milestones: GOAL_COUNT_MILESTONES,
+      }),
+      buildProgressAchievement({
+        id: "judging-goals",
+        title: "Judging goals",
+        icon: <JudgeLinkIcon className="w-4 h-4" />,
+        progress: judgedGoalsResolved,
+        milestones: GOAL_COUNT_MILESTONES,
+      }),
+      buildProgressAchievement({
+        id: "money-donated-charity",
+        title: "Money donated to charity",
+        icon: <CharityDonationIcon className="w-4 h-4" />,
+        progress: donatedToCharity,
+        milestones: DONATION_MILESTONES,
+        isCurrency: true,
+      }),
+      buildProgressAchievement({
+        id: "creating-staked-goals",
+        title: "Creating staked goals",
+        icon: <Plus className="w-4 h-4" />,
+        progress: stakedGoalsCreated,
+        milestones: GOAL_COUNT_MILESTONES,
+      }),
+      buildProgressAchievement({
+        id: "completing-staked-goals",
+        title: "Completing staked goals",
+        icon: <Trophy className="w-4 h-4" />,
+        progress: stakedGoalsCompleted,
+        milestones: GOAL_COUNT_MILESTONES,
+      }),
+      buildProgressAchievement({
+        id: "judging-staked-goals",
+        title: "Judging staked goals",
+        icon: <JudgeLinkIcon className="w-4 h-4" />,
+        progress: judgedStakedGoalsResolved,
+        milestones: GOAL_COUNT_MILESTONES,
+      }),
+    ];
   }, [stats]);
 
   const loading = goalsLoading || judgeGoalsLoading || profileLoading;
@@ -417,30 +558,45 @@ function ProfileInner() {
   useEffect(() => {
     if (loading) return;
 
-    const earnedAchievements = achievements.filter((achievement) => achievement.progress >= achievement.target);
-    const earnedIds = new Set(earnedAchievements.map((achievement) => achievement.id));
+    const levelById = new Map(achievements.map((achievement) => [achievement.id, achievement.level]));
 
     if (!initializedAchievementsRef.current) {
-      knownEarnedAchievementIdsRef.current = earnedIds;
+      knownAchievementLevelsRef.current = levelById;
       initializedAchievementsRef.current = true;
       return;
     }
 
-    earnedAchievements.forEach((achievement) => {
-      if (knownEarnedAchievementIdsRef.current.has(achievement.id)) return;
-
-      toast.success("Achievement completed!", {
-        id: `achievement-${achievement.id}`,
-        description: `${achievement.title}: ${achievement.description}`,
-      });
+    achievements.forEach((achievement) => {
+      const prevLevel = knownAchievementLevelsRef.current.get(achievement.id) ?? 0;
+      if (achievement.level <= prevLevel) return;
+      for (let lvl = prevLevel + 1; lvl <= achievement.level; lvl += 1) {
+        const goal = (achievement.isCurrency ? DONATION_MILESTONES : GOAL_COUNT_MILESTONES)[lvl - 1];
+        const levelTitle = `${achievement.title} · Level ${lvl}`;
+        const levelDesc = `Reached ${formatMilestone(goal, Boolean(achievement.isCurrency))}.`;
+        void supabase
+          .rpc("record_achievement_earned", {
+            p_achievement_id: `${achievement.id}-lvl-${lvl}`,
+            p_achievement_title: levelTitle,
+            p_achievement_description: levelDesc,
+          })
+          .then(({ error }) => {
+            if (error) {
+              console.warn("Could not record achievement notification", error);
+              toast.success("Achievement completed!", {
+                id: `achievement-${achievement.id}-lvl-${lvl}`,
+                description: `${levelTitle}: ${levelDesc}`,
+              });
+            }
+          });
+      }
     });
 
-    knownEarnedAchievementIdsRef.current = earnedIds;
+    knownAchievementLevelsRef.current = levelById;
   }, [achievements, loading]);
 
   useEffect(() => {
     initializedAchievementsRef.current = false;
-    knownEarnedAchievementIdsRef.current = new Set();
+    knownAchievementLevelsRef.current = new Map();
   }, [user?.id]);
 
   return (
@@ -555,48 +711,47 @@ function ProfileInner() {
                   <span className="min-w-0 truncate">
                     your account id {friendCodeDbReady ? friendCode ?? "…" : "unavailable"}
                   </span>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md p-1 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    disabled={!friendCodeDbReady || !friendCode}
+                    aria-label="Copy Account ID"
+                    title="Copy Account ID"
+                    onClick={async () => {
+                      if (!friendCode) return;
+                      try {
+                        if (navigator.clipboard?.writeText) {
+                          await navigator.clipboard.writeText(friendCode);
+                          toast.success("Account ID copied.");
+                          return;
+                        }
+                      } catch (e) {
+                        console.error("Clipboard error", e);
+                      }
+                      try {
+                        const ta = document.createElement("textarea");
+                        ta.value = friendCode;
+                        ta.style.position = "fixed";
+                        ta.style.left = "-9999px";
+                        document.body.appendChild(ta);
+                        ta.focus();
+                        ta.select();
+                        document.execCommand("copy");
+                        document.body.removeChild(ta);
+                        toast.success("Account ID copied.");
+                      } catch (e) {
+                        console.error("Clipboard fallback error", e);
+                        toast.error("Could not copy Account ID.");
+                      }
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
                   <Calendar className="w-3.5 h-3.5 shrink-0" />
                   <span className="min-w-0 truncate">member since {formatDate(createdAt)}</span>
                 </div>
-              </div>
-
-              <div className="mt-4">
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  disabled={!friendCodeDbReady || !friendCode}
-                  onClick={async () => {
-                    if (!friendCode) return;
-                    try {
-                      if (navigator.clipboard?.writeText) {
-                        await navigator.clipboard.writeText(friendCode);
-                        toast.success("Account ID copied.");
-                        return;
-                      }
-                    } catch (e) {
-                      console.error("Clipboard error", e);
-                    }
-                    try {
-                      const ta = document.createElement("textarea");
-                      ta.value = friendCode;
-                      ta.style.position = "fixed";
-                      ta.style.left = "-9999px";
-                      document.body.appendChild(ta);
-                      ta.focus();
-                      ta.select();
-                      document.execCommand("copy");
-                      document.body.removeChild(ta);
-                      toast.success("Account ID copied.");
-                    } catch (e) {
-                      console.error("Clipboard fallback error", e);
-                      toast.error("Could not copy Account ID.");
-                    }
-                  }}
-                >
-                  Copy Account ID
-                </Button>
               </div>
             </div>
           </div>
@@ -604,7 +759,7 @@ function ProfileInner() {
 
         <div className="p-5 rounded-[20px] bg-card border border-border">
           <h2 className="text-sm font-display font-semibold text-foreground">Your stats</h2>
-          <div className="mt-3 grid grid-cols-2 gap-3">
+          <div className="mt-3 grid grid-cols-3 gap-2">
             <div className="p-3 rounded-[16px] bg-muted/40 border border-border/40">
               <p className="text-xs text-muted-foreground">Resolved goals</p>
               <p className="text-2xl font-display font-extrabold text-foreground tabular-nums mt-1">
@@ -622,6 +777,57 @@ function ProfileInner() {
               <p className="text-[11px] text-muted-foreground mt-1 tabular-nums">
                 {stats.judgeCompleted} completed • {stats.judgeFailed} failed
               </p>
+            </div>
+            <div className="p-3 rounded-[16px] bg-muted/40 border border-border/40">
+              <p className="text-xs text-muted-foreground">Staked money</p>
+              <p className="text-lg font-display font-extrabold text-foreground tabular-nums mt-1">
+                {formatUsd(stats.stakedOnTheLine)}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-1 tabular-nums">
+                {formatUsd(stats.stakedSaved)} saved • {formatUsd(stats.stakedNotSaved)} donated
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 rounded-[16px] border border-border/40 bg-muted/25 p-3">
+            <p className="text-xs text-muted-foreground">Stake vs Non-stake success</p>
+            <div className="mt-3 space-y-3">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-medium text-foreground">Staked goals</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {stats.stakedSuccessRate !== null ? `${stats.stakedSuccessRate}% success` : "No resolved goals"}
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div className="flex h-full w-full">
+                    <div className="bg-emerald-500" style={{ width: `${stats.stakedCompletedPct}%` }} />
+                    <div className="bg-orange-500" style={{ width: `${stats.stakedFailedPct}%` }} />
+                    <div className="bg-muted-foreground/50" style={{ width: `${stats.stakedActivePct}%` }} />
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground tabular-nums">
+                  {stats.stakedCompleted} completed • {stats.stakedFailed} failed • {stats.stakedActive} active
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-medium text-foreground">Non-staked goals</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {stats.nonStakedSuccessRate !== null ? `${stats.nonStakedSuccessRate}% success` : "No resolved goals"}
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div className="flex h-full w-full">
+                    <div className="bg-emerald-500" style={{ width: `${stats.nonStakedCompletedPct}%` }} />
+                    <div className="bg-orange-500" style={{ width: `${stats.nonStakedFailedPct}%` }} />
+                    <div className="bg-muted-foreground/50" style={{ width: `${stats.nonStakedActivePct}%` }} />
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground tabular-nums">
+                  {stats.nonStakedCompleted} completed • {stats.nonStakedFailed} failed • {stats.nonStakedActive} active
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -645,55 +851,71 @@ function ProfileInner() {
           ) : (
             <div className="space-y-3">
               {achievements.map((a) => {
-                const earned = a.progress >= a.target;
+                const earned = a.level > 0;
+                const nonStakedCategory =
+                  a.id === "creating-goals" || a.id === "completing-goals" || a.id === "judging-goals";
+                const levelTextClass = nonStakedCategory ? "text-yellow-200" : "text-emerald-500";
+                const iconSpanClass = nonStakedCategory ? "text-yellow-200" : "text-primary";
+                const progressFillClass = nonStakedCategory ? "bg-yellow-300" : "bg-primary";
                 const pctRaw =
-                  a.target <= 0 ? 100 : (Math.min(a.progress, a.target) / a.target) * 100;
+                  a.nextGoal <= 0 ? 100 : (Math.min(a.progress, a.nextGoal) / a.nextGoal) * 100;
                 const pct = Number.isFinite(pctRaw) ? Math.round(pctRaw) : 0;
+                const shownProgress = earned ? Math.min(a.progress, a.nextGoal) : a.progress;
                 return (
                   <Card
                     key={a.id}
                     className={`p-4 rounded-[20px] bg-card border border-border ${
-                      earned ? "border-primary/30 bg-primary/5" : ""
+                      earned
+                        ? nonStakedCategory
+                          ? "border-yellow-300/25 bg-yellow-300/[0.06]"
+                          : "border-primary/30 bg-primary/5"
+                        : ""
                     }`}
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex items-start gap-3 min-w-0">
                         <div
                           className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
-                            earned ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"
+                            earned
+                              ? nonStakedCategory
+                                ? "bg-yellow-300/15 text-yellow-200"
+                                : "bg-primary/15 text-primary"
+                              : "bg-muted text-muted-foreground"
                           }`}
                         >
                           {earned ? (
-                            <span className="text-primary">{a.icon}</span>
+                            <span className={iconSpanClass}>{a.icon}</span>
                           ) : (
                             <span>{a.icon}</span>
                           )}
                         </div>
                         <div className="min-w-0">
                           <p className="font-display font-semibold text-foreground truncate">{a.title}</p>
-                          <p className="text-xs text-muted-foreground mt-1">{a.description}</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Next milestone {formatMilestone(a.nextGoal, Boolean(a.isCurrency))}
+                          </p>
                         </div>
                       </div>
 
                       <div className="text-right shrink-0">
                         {earned ? (
-                          <div className="inline-flex items-center gap-2 text-emerald-500 text-xs tabular-nums">
+                          <div className={`inline-flex items-center gap-2 text-xs tabular-nums ${levelTextClass}`}>
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            Earned
+                            Level {a.level}
                           </div>
                         ) : (
                           <div className="inline-flex items-center gap-2 text-muted-foreground text-xs tabular-nums">
                             <CircleX className="w-3.5 h-3.5" />
-                            {a.progress}/{a.target}
+                            Level 0
                           </div>
                         )}
                       </div>
                     </div>
 
                     <div className="mt-3">
-                      <Progress value={pct} />
+                      <Progress value={pct} indicatorClassName={progressFillClass} />
                       <p className="text-[11px] text-muted-foreground mt-2 tabular-nums">
-                        {pct}% ({a.progress} of {a.target})
+                        {pct}% ({a.isCurrency ? `$${shownProgress}` : shownProgress} of {a.isCurrency ? `$${a.nextGoal}` : a.nextGoal})
                       </p>
                     </div>
                   </Card>

@@ -253,11 +253,26 @@ function useProvideAuth(): AuthContextValue {
       : `${window.location.origin}/`;
 
   const signUp = async (email: string, password: string, displayName?: string) => {
+    const trimmedName = String(displayName ?? '').trim();
+    if (!trimmedName) {
+      throw new Error('Display name is required.');
+    }
+    const { data: isAvailable, error: availabilityError } = await supabase.rpc('is_display_name_available', {
+      p_display_name: trimmedName,
+      p_exclude_user_id: null,
+    });
+    if (availabilityError) {
+      throw availabilityError;
+    }
+    if (!isAvailable) {
+      throw new Error('That username is already taken. Please choose another.');
+    }
+
     const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { display_name: displayName, needs_app_tutorial: true },
+        data: { display_name: trimmedName, needs_app_tutorial: true },
         emailRedirectTo: authEmailRedirectTo(),
       },
     });

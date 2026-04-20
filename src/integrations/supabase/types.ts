@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      user_dashboard_layout: {
+        Row: {
+          user_id: string
+          organizer: Json
+          goal_order_ids: Json
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          organizer?: Json
+          goal_order_ids?: Json
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          organizer?: Json
+          goal_order_ids?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           app_tutorial_done_at: string | null
@@ -233,6 +254,14 @@ export type Database = {
         Args: { p_to_friend_code: string }
         Returns: { request_id: string; to_user_id: string }[]
       }
+      send_friend_request_to_user: {
+        Args: { p_to_user_id: string }
+        Returns: { request_id: string; to_user_id: string }[]
+      }
+      is_display_name_available: {
+        Args: { p_display_name: string; p_exclude_user_id?: string | null }
+        Returns: boolean
+      }
       accept_friend_request: {
         Args: { p_request_id: string }
         Returns: undefined
@@ -269,10 +298,22 @@ export type Database = {
         Args: { p_goal_id: string }
         Returns: undefined
       }
+      send_pulse_completion_congrats: {
+        Args: { p_recipient_user_id: string; p_goal_title: string; p_variant?: string }
+        Returns: undefined
+      }
+      send_pulse_reaction: {
+        Args: { p_recipient_user_id: string; p_goal_title: string; p_action: string; p_variant?: string }
+        Returns: undefined
+      }
+      record_achievement_earned: {
+        Args: { p_achievement_id: string; p_achievement_title: string; p_achievement_description?: string }
+        Returns: undefined
+      }
     }
     Enums: {
       friend_request_status: "pending" | "accepted" | "ignored"
-      pulse_action: "created" | "completed" | "failed" | "staked"
+      pulse_action: "created" | "completed" | "failed" | "staked" | "achievement"
       judge_request_status: "pending" | "accepted" | "ignored" | "cancelled"
     }
     CompositeTypes: {

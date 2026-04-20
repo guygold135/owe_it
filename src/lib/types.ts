@@ -42,7 +42,7 @@ export interface PulseItem {
   userId: string;
   userName: string;
   userAvatar: string;
-  action: 'created' | 'completed' | 'failed' | 'staked';
+  action: 'created' | 'completed' | 'failed' | 'staked' | 'achievement';
   goalTitle: string;
   stake: number;
   timestamp: Date;

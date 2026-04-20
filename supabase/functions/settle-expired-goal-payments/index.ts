@@ -2,19 +2,14 @@ import Stripe from "npm:stripe@16.6.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createFailedStakePaymentIntent } from "../_shared/failed-stake-intent.ts";
+import { buildCorsHeaders } from "../_shared/cors.ts";
 
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const cronSecret = Deno.env.get("AUTO_EXPIRE_CRON_SECRET");
 
-const corsHeaders: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
-
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, corsHeaders: Record<string, string>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -114,21 +109,30 @@ async function settleFailedPayment(
 }
 
 serve(async (req: Request): Promise<Response> => {
+  const corsHeaders = buildCorsHeaders(
+    req,
+    "authorization, x-client-info, apikey, content-type, x-cron-secret",
+  );
+  if (!corsHeaders) {
+    return new Response("Origin not allowed", { status: 403 });
+  }
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { status: 200, headers: corsHeaders });
   }
 
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return jsonResponse({ error: "Method not allowed" }, corsHeaders, 405);
   }
 
   try {
     if (!stripeSecret || !supabaseUrl || !supabaseServiceKey) {
-      return jsonResponse({ error: "Server configuration missing" }, 500);
+      return jsonResponse({ error: "Server configuration missing" }, corsHeaders, 500);
     }
     if (!cronSecret) {
       return jsonResponse(
         { error: "AUTO_EXPIRE_CRON_SECRET is not configured" },
+        corsHeaders,
         500
       );
     }
@@ -136,7 +140,7 @@ serve(async (req: Request): Promise<Response> => {
     // Mandatory shared-secret guard for scheduler/webhook invocations.
     const provided = req.headers.get("x-cron-secret");
     if (provided !== cronSecret) {
-      return jsonResponse({ error: "Unauthorized" }, 401);
+      return jsonResponse({ error: "Unauthorized" }, corsHeaders, 401);
     }
 
     const stripe = new Stripe(stripeSecret, {
@@ -162,7 +166,7 @@ serve(async (req: Request): Promise<Response> => {
 
     if (expireError) {
       console.error("Expiry update failed:", expireError.message);
-      return jsonResponse({ error: "Could not expire overdue goals" }, 500);
+      return jsonResponse({ error: "Could not expire overdue goals" }, corsHeaders, 500);
     }
 
     const pulseRows = (expiredGoals ?? [])
@@ -194,7 +198,7 @@ serve(async (req: Request): Promise<Response> => {
 
     if (queryError) {
       console.error("Query failed:", queryError.message);
-      return jsonResponse({ error: "Could not load goals to settle" }, 500);
+      return jsonResponse({ error: "Could not load goals to settle" }, corsHeaders, 500);
     }
 
     let processed = 0;
@@ -263,10 +267,10 @@ serve(async (req: Request): Promise<Response> => {
       failedNeedsAction,
       skipped,
       errors,
-    });
+    }, corsHeaders);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("settle-expired-goal-payments error:", message);
-    return jsonResponse({ error: message }, 500);
+    return jsonResponse({ error: message }, corsHeaders, 500);
   }
 });

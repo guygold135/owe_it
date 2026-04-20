@@ -23,3 +23,7 @@ Vite, React, TypeScript, Tailwind CSS, Supabase, Stripe.
 ## Deployment
 
 Use `DEPLOYMENT.md` for the full production checklist and commands.
+
+## Operations
+
+See `RUNBOOK.md` for monitoring SQL, incident response, and support workflows.

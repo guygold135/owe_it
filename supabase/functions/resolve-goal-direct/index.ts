@@ -2,28 +2,18 @@ import Stripe from "npm:stripe@16.6.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createFailedStakePaymentIntent } from "../_shared/failed-stake-intent.ts";
+import { buildCorsHeaders } from "../_shared/cors.ts";
 
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
 
-const corsHeaders: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
-
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, corsHeaders: Record<string, string>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
   });
-}
-
-// Important: the frontend treats non-2xx as a transport error.
-// We always respond with HTTP 200 and put success/error in the JSON body.
-function jsonOk(body: unknown) {
-  return jsonResponse(body, 200);
 }
 
 async function settleFailedPayment(
@@ -97,17 +87,25 @@ async function settleFailedPayment(
 
 async function getAuthenticatedUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ") || !supabaseUrl || !supabaseServiceKey) return null;
+  if (!authHeader?.startsWith("Bearer ") || !supabaseUrl || !supabaseAnonKey) return null;
 
   const token = authHeader.slice(7);
-  // Use the service role key so this works even if SUPABASE_ANON_KEY isn't set.
-  const authClient = createClient(supabaseUrl, supabaseServiceKey);
+  const authClient = createClient(supabaseUrl, supabaseAnonKey);
   const { data: { user }, error } = await authClient.auth.getUser(token);
   if (error || !user?.id) return null;
   return user.id;
 }
 
 serve(async (req: Request): Promise<Response> => {
+  const corsHeaders = buildCorsHeaders(req);
+  if (!corsHeaders) {
+    return new Response("Origin not allowed", { status: 403 });
+  }
+
+  // Important: the frontend treats non-2xx as a transport error.
+  // We always respond with HTTP 200 and put success/error in the JSON body.
+  const jsonOk = (body: unknown) => jsonResponse(body, corsHeaders, 200);
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { status: 200, headers: corsHeaders });
   }

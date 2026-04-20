@@ -282,31 +282,34 @@
     color: hsl(var(--muted-foreground));
   }
 
-  /** Splash / auth bootstrap: seamless loading indicator (no snap-back pulse). */
+  /** Splash / auth bootstrap: softer loading indicator with smoother motion. */
   .loading-track {
     width: 9rem;
-    height: 0.32rem;
+    height: 0.36rem;
     border-radius: 999px;
-    background: hsl(var(--muted) / 0.55);
+    background: hsl(var(--muted) / 0.45);
     overflow: hidden;
     position: relative;
+    box-shadow: inset 0 0 0 1px hsl(var(--border) / 0.45);
   }
 
   .loading-bar {
     position: absolute;
     inset: 0;
-    width: 40%;
+    width: 46%;
     border-radius: 999px;
-    background: linear-gradient(90deg, hsl(var(--primary) / 0.35), hsl(var(--primary) / 0.95));
-    animation: loading-slide 1.15s linear infinite;
+    background: linear-gradient(90deg, hsl(var(--primary) / 0.2), hsl(var(--primary) / 0.92) 45%, hsl(var(--primary) / 0.35));
+    filter: blur(0.2px);
+    will-change: transform;
+    animation: loading-slide 1.35s cubic-bezier(0.4, 0, 0.2, 1) infinite;
   }
 
   @keyframes loading-slide {
     from {
-      transform: translateX(-120%);
+      transform: translate3d(-120%, 0, 0);
     }
     to {
-      transform: translateX(300%);
+      transform: translate3d(260%, 0, 0);
     }
   }
 

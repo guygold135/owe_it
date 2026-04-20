@@ -155,18 +155,21 @@ export default function Auth() {
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-sm flex-col items-center justify-center">
         {/* Logo & Tagline */}
         <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
           className="mb-10 text-center"
         >
           <div className="mx-auto mb-5 flex h-24 w-24 items-center justify-center rounded-[28px] bg-card/55 p-3 backdrop-blur-md">
             <img
               src={APP_LOGO_SRC}
               alt=""
-              className="h-full w-full object-contain drop-shadow-sm"
-              width={112}
-              height={112}
+              className="h-full w-full object-contain drop-shadow-sm select-none"
+              width={72}
+              height={72}
               decoding="async"
+              loading="eager"
+              fetchPriority="high"
             />
           </div>
           <h1 className="text-4xl font-display font-extrabold tracking-tight text-foreground">

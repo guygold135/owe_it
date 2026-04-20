@@ -42,6 +42,14 @@ VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_ANON_KEY
 VITE_STRIPE_PUBLISHABLE_KEY=pk_live_...
 ```
 
+Optional (recommended for production): add **`VITE_SENTRY_DSN`** from [Sentry](https://sentry.io/) so browser errors are reported. Omit locally if you do not use it.
+
+---
+
+## Operations and monitoring
+
+See **`RUNBOOK.md`** for SQL health checks, incident triage, and links to GitHub / Stripe / Supabase logs.
+
 ---
 
 ## 2) Supabase project setup
@@ -110,9 +118,11 @@ supabase secrets set ADMIN_EMAIL=admin@yourdomain.com
 supabase secrets set RESEND_API_KEY=re_...
 supabase secrets set FEEDBACK_TO_EMAIL=feedback@yourdomain.com
 supabase secrets set FEEDBACK_FROM_EMAIL=feedback@yourdomain.com
+supabase secrets set CORS_ALLOWED_ORIGINS=https://oweit.site,https://www.oweit.site,http://localhost:8080,http://localhost:5173
 ```
 
 Tip: use a long random value for `AUTO_EXPIRE_CRON_SECRET` (at least 32 chars).
+Tip: set `CORS_ALLOWED_ORIGINS` to a comma-separated list of trusted web app origins only.
 
 ### 3.2 Deploy functions
 

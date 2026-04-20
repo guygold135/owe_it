@@ -1,17 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { buildCorsHeaders } from "../_shared/cors.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
 
-const corsHeaders: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
-
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, corsHeaders: Record<string, string>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -35,6 +30,11 @@ async function getAuthenticatedUser(
 }
 
 serve(async (req: Request): Promise<Response> => {
+  const corsHeaders = buildCorsHeaders(req);
+  if (!corsHeaders) {
+    return new Response("Origin not allowed", { status: 403 });
+  }
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { status: 200, headers: corsHeaders });
   }
@@ -50,12 +50,13 @@ serve(async (req: Request): Promise<Response> => {
     if (!supabaseUrl || !supabaseServiceKey) {
       return jsonResponse(
         { error: "Server missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" },
+        corsHeaders,
         500,
       );
     }
 
     const authUser = await getAuthenticatedUser(req);
-    if (!authUser) return jsonResponse({ error: "Unauthorized" }, 401);
+    if (!authUser) return jsonResponse({ error: "Unauthorized" }, corsHeaders, 401);
 
     // Configure exactly ONE admin account using either of these env vars:
     // - ADMIN_USER_ID (recommended)
@@ -68,7 +69,7 @@ serve(async (req: Request): Promise<Response> => {
       (adminEmail && authUser.email?.toLowerCase() === adminEmail.toLowerCase());
 
     if (!isAdmin) {
-      return jsonResponse({ error: "Forbidden" }, 403);
+      return jsonResponse({ error: "Forbidden" }, corsHeaders, 403);
     }
 
     const admin = createClient(supabaseUrl, supabaseServiceKey);
@@ -79,13 +80,13 @@ serve(async (req: Request): Promise<Response> => {
 
     if (error) {
       console.error("admin-feedback query error:", error);
-      return jsonResponse({ error: "Could not load feedback" }, 500);
+      return jsonResponse({ error: "Could not load feedback" }, corsHeaders, 500);
     }
 
-    return jsonResponse({ success: true, feedback: data });
+    return jsonResponse({ success: true, feedback: data }, corsHeaders);
   } catch (err: unknown) {
     console.error("admin-feedback error:", err);
-    return jsonResponse({ error: "Unexpected server error" }, 500);
+    return jsonResponse({ error: "Unexpected server error" }, corsHeaders, 500);
   }
 });
 

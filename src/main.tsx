@@ -1,3 +1,4 @@
+import "./lib/sentry";
 import "@/lib/sessionBootstrap";
 import { createRoot } from "react-dom/client";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";

@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { buildCorsHeaders } from "../_shared/cors.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -7,12 +8,6 @@ const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
 const resendApiKey = Deno.env.get("RESEND_API_KEY");
 const feedbackToEmail = Deno.env.get("FEEDBACK_TO_EMAIL");
 const feedbackFromEmail = Deno.env.get("FEEDBACK_FROM_EMAIL") ?? "feedback@oweit.app";
-
-const corsHeaders: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
 
 const allowedCategories = new Set([
   "Improvement idea",
@@ -24,7 +19,7 @@ const allowedCategories = new Set([
   "Other",
 ]);
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, corsHeaders: Record<string, string>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -85,6 +80,11 @@ async function sendFeedbackEmail(params: {
 }
 
 serve(async (req: Request): Promise<Response> => {
+  const corsHeaders = buildCorsHeaders(req);
+  if (!corsHeaders) {
+    return new Response("Origin not allowed", { status: 403 });
+  }
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { status: 200, headers: corsHeaders });
   }
@@ -100,13 +100,14 @@ serve(async (req: Request): Promise<Response> => {
     if (!supabaseUrl || !supabaseServiceKey) {
       return jsonResponse(
         { error: "Server missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" },
+        corsHeaders,
         500
       );
     }
 
     const authUser = await getAuthenticatedUser(req);
     if (!authUser) {
-      return jsonResponse({ error: "Unauthorized" }, 401);
+      return jsonResponse({ error: "Unauthorized" }, corsHeaders, 401);
     }
 
     const { category, message } = await req.json();
@@ -114,13 +115,13 @@ serve(async (req: Request): Promise<Response> => {
     const safeMessage = typeof message === "string" ? message.trim() : "";
 
     if (!allowedCategories.has(safeCategory)) {
-      return jsonResponse({ error: "Invalid feedback category" }, 400);
+      return jsonResponse({ error: "Invalid feedback category" }, corsHeaders, 400);
     }
     if (!safeMessage) {
-      return jsonResponse({ error: "Feedback message is required" }, 400);
+      return jsonResponse({ error: "Feedback message is required" }, corsHeaders, 400);
     }
     if (safeMessage.length > 5000) {
-      return jsonResponse({ error: "Feedback message is too long" }, 400);
+      return jsonResponse({ error: "Feedback message is too long" }, corsHeaders, 400);
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -135,7 +136,7 @@ serve(async (req: Request): Promise<Response> => {
 
     if (insertError) {
       console.error("Feedback insert failed:", insertError.message);
-      return jsonResponse({ error: "Could not save feedback" }, 500);
+      return jsonResponse({ error: "Could not save feedback" }, corsHeaders, 500);
     }
 
     const emailResult = await sendFeedbackEmail({
@@ -148,9 +149,9 @@ serve(async (req: Request): Promise<Response> => {
     return jsonResponse({
       success: true,
       emailed: emailResult.emailed,
-    });
+    }, corsHeaders);
   } catch (err: any) {
     console.error("submit-feedback error:", err?.message ?? err);
-    return jsonResponse({ error: "Unexpected server error" }, 500);
+    return jsonResponse({ error: "Unexpected server error" }, corsHeaders, 500);
   }
 });

@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { buildCorsHeaders } from "../_shared/cors.ts";
 
 /**
  * Permanent account deletion for the currently signed-in user.
@@ -14,13 +15,7 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
 
-const corsHeaders: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
-
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, corsHeaders: Record<string, string>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -76,6 +71,11 @@ async function purgePublicUserData(
 }
 
 serve(async (req: Request): Promise<Response> => {
+  const corsHeaders = buildCorsHeaders(req);
+  if (!corsHeaders) {
+    return new Response("Origin not allowed", { status: 403 });
+  }
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { status: 200, headers: corsHeaders });
   }
@@ -91,13 +91,14 @@ serve(async (req: Request): Promise<Response> => {
     if (!supabaseUrl || !supabaseServiceKey) {
       return jsonResponse(
         { error: "Server missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" },
+        corsHeaders,
         500,
       );
     }
 
     const userId = await getAuthenticatedUserId(req);
     if (!userId) {
-      return jsonResponse({ error: "Unauthorized" }, 401);
+      return jsonResponse({ error: "Unauthorized" }, corsHeaders, 401);
     }
 
     const admin = createClient(supabaseUrl, supabaseServiceKey);
@@ -115,6 +116,7 @@ serve(async (req: Request): Promise<Response> => {
       console.error("delete-account judge blocker check:", judgeBlockersError.message);
       return jsonResponse(
         { error: "Could not verify judge commitments. Try again in a moment." },
+        corsHeaders,
         500,
       );
     }
@@ -124,6 +126,7 @@ serve(async (req: Request): Promise<Response> => {
           error:
             "You are still the judge on an active staked goal owned by someone else. Finish judging those goals first, then try again.",
         },
+        corsHeaders,
         409,
       );
     }
@@ -133,6 +136,7 @@ serve(async (req: Request): Promise<Response> => {
       console.error("delete-account purge failed:", purge.error);
       return jsonResponse(
         { error: `Could not remove all data: ${purge.error}` },
+        corsHeaders,
         500,
       );
     }
@@ -142,13 +146,14 @@ serve(async (req: Request): Promise<Response> => {
       console.error("delete-account auth.admin.deleteUser:", deleteAuthError.message);
       return jsonResponse(
         { error: deleteAuthError.message || "Could not delete auth user" },
+        corsHeaders,
         500,
       );
     }
 
-    return jsonResponse({ success: true });
+    return jsonResponse({ success: true }, corsHeaders);
   } catch (err: unknown) {
     console.error("delete-account error:", err);
-    return jsonResponse({ error: "Unexpected server error" }, 500);
+    return jsonResponse({ error: "Unexpected server error" }, corsHeaders, 500);
   }
 });

@@ -52,8 +52,11 @@ function BootstrapLogoScreen() {
         src={APP_LOGO_SRC}
         alt=""
         aria-hidden
-        className="block h-36 w-36 sm:h-44 sm:w-44 object-contain"
+        className="block h-36 w-36 sm:h-44 sm:w-44 object-contain drop-shadow-sm select-none"
+        width={176}
+        height={176}
         decoding="sync"
+        loading="eager"
         fetchPriority="high"
       />
       <div className="loading-track" aria-hidden>

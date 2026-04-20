@@ -8,6 +8,7 @@ import {
   stripeUnitsToStakeMajor,
 } from "../_shared/stripe-money.ts";
 import { DEFAULT_CHARITY_ID, isValidCharityId } from "../_shared/charities.ts";
+import { buildCorsHeaders } from "../_shared/cors.ts";
 
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -18,13 +19,7 @@ const stripe = new Stripe(stripeSecret ?? "", {
   apiVersion: "2024-06-20",
 });
 
-const corsHeaders: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
-
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, corsHeaders: Record<string, string>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -57,6 +52,11 @@ async function getAuthenticatedUserId(req: Request): Promise<string | null> {
 }
 
 serve(async (req: Request): Promise<Response> => {
+  const corsHeaders = buildCorsHeaders(req);
+  if (!corsHeaders) {
+    return new Response("Origin not allowed", { status: 403 });
+  }
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { status: 200, headers: corsHeaders });
   }
@@ -72,6 +72,7 @@ serve(async (req: Request): Promise<Response> => {
     if (!stripeSecret) {
       return jsonResponse(
         { error: "Stripe secret key not configured" },
+          corsHeaders,
         500
       );
     }
@@ -82,7 +83,7 @@ serve(async (req: Request): Promise<Response> => {
     if (body.paymentMethodId) {
       const authUserId = await getAuthenticatedUserId(req);
       if (!authUserId) {
-        return jsonResponse({ error: "Unauthorized" }, 401);
+        return jsonResponse({ error: "Unauthorized" }, corsHeaders, 401);
       }
 
       const {
@@ -115,6 +116,7 @@ serve(async (req: Request): Promise<Response> => {
       ) {
         return jsonResponse(
           { error: "Missing or invalid fields for in-app payment" },
+          corsHeaders,
           400
         );
       }
@@ -130,22 +132,24 @@ serve(async (req: Request): Promise<Response> => {
             error:
               `Minimum stake is ${minMajor} ${normalizedCurrency.toUpperCase()} (at least US$1).`,
           },
+          corsHeaders,
           400,
         );
       }
 
       const expectedUnits = stakeMajorToStripeUnits(stakeMajor, normalizedCurrency);
       if (Math.trunc(stripeAmountRaw) !== expectedUnits) {
-        return jsonResponse({ error: "Invalid stake amount for currency" }, 400);
+        return jsonResponse({ error: "Invalid stake amount for currency" }, corsHeaders, 400);
       }
 
       if (userId !== authUserId) {
-        return jsonResponse({ error: "Forbidden" }, 403);
+        return jsonResponse({ error: "Forbidden" }, corsHeaders, 403);
       }
 
       if (!supabaseUrl || !supabaseServiceKey) {
         return jsonResponse(
           { error: "Server missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" },
+          corsHeaders,
           500
         );
       }
@@ -172,6 +176,7 @@ serve(async (req: Request): Promise<Response> => {
               error: errorMessage(attachErr, "Could not attach payment method to a Stripe customer"),
               stage: "attach_payment_method",
             },
+            corsHeaders,
             500,
           );
         }
@@ -189,6 +194,7 @@ serve(async (req: Request): Promise<Response> => {
             error: errorMessage(customerUpdateErr, "Could not update the Stripe customer"),
             stage: "update_customer",
           },
+          corsHeaders,
           500,
         );
       }
@@ -350,17 +356,18 @@ serve(async (req: Request): Promise<Response> => {
             error: errorMessage(insertError, "Payment method saved but goal could not be saved"),
             stage: "insert_goal",
           },
+          corsHeaders,
           500
         );
       }
 
-      return jsonResponse({ success: true, goalId });
+      return jsonResponse({ success: true, goalId }, corsHeaders);
     }
 
     // Redirect flow: create Checkout Session (legacy / optional)
     const authUserId = await getAuthenticatedUserId(req);
     if (!authUserId) {
-      return jsonResponse({ error: "Unauthorized" }, 401);
+      return jsonResponse({ error: "Unauthorized" }, corsHeaders, 401);
     }
 
     const { amount, goalTitle, successUrl, cancelUrl } = body;
@@ -371,7 +378,7 @@ serve(async (req: Request): Promise<Response> => {
       !Number.isFinite(amount) ||
       amount <= 0
     ) {
-      return jsonResponse({ error: "Invalid amount" }, 400);
+      return jsonResponse({ error: "Invalid amount" }, corsHeaders, 400);
     }
 
     const checkoutStakeMajor = stripeUnitsToStakeMajor(Math.trunc(amount), normalizedCurrency);
@@ -382,11 +389,12 @@ serve(async (req: Request): Promise<Response> => {
           error:
             `Minimum stake is ${checkoutMin} ${normalizedCurrency.toUpperCase()} (at least US$1).`,
         },
+        corsHeaders,
         400,
       );
     }
     if (stakeMajorToStripeUnits(checkoutStakeMajor, normalizedCurrency) !== Math.trunc(amount)) {
-      return jsonResponse({ error: "Invalid amount for currency" }, 400);
+      return jsonResponse({ error: "Invalid amount for currency" }, corsHeaders, 400);
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -407,11 +415,12 @@ serve(async (req: Request): Promise<Response> => {
       cancel_url: cancelUrl,
     });
 
-    return jsonResponse({ sessionUrl: session.url });
+    return jsonResponse({ sessionUrl: session.url }, corsHeaders);
   } catch (err: any) {
     console.error("Stripe error:", err?.message ?? err);
     return jsonResponse(
       { error: err?.message ?? "Unknown Stripe error", stage: "unexpected" },
+      corsHeaders,
       500
     );
   }

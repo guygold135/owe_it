@@ -7,6 +7,7 @@ import {
 } from '@/lib/sessionBootstrap';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import { isElevenDigitDisplayName } from '@/lib/displayName';
 
 type AuthUser = {
   id: string;
@@ -256,6 +257,11 @@ function useProvideAuth(): AuthContextValue {
     const trimmedName = String(displayName ?? '').trim();
     if (!trimmedName) {
       throw new Error('Display name is required.');
+    }
+    if (isElevenDigitDisplayName(trimmedName)) {
+      throw new Error(
+        'Display name cannot be exactly 11 digits (reserved). Add a letter or use a different length.',
+      );
     }
     const { data: isAvailable, error: availabilityError } = await supabase.rpc('is_display_name_available', {
       p_display_name: trimmedName,

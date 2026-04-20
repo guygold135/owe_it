@@ -19,6 +19,7 @@ import {
   writeProfileAvatarToStorage,
 } from "@/lib/profileAvatarEvents";
 import { resizeImageToJpegBlob } from "@/lib/resizeAvatarImage";
+import { isElevenDigitDisplayName } from "@/lib/displayName";
 
 type ProfileRow = {
   display_name: string;
@@ -241,11 +242,30 @@ function ProfileInner() {
   const displayName = profile?.display_name || user?.displayName || (email ? email.split("@")[0] : "Guest");
   const initial = (displayName || "Guest").trim().charAt(0).toUpperCase();
 
+  const handleEditDisplayNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.value;
+    if (isElevenDigitDisplayName(next)) {
+      toast.error(
+        "Display name cannot be exactly 11 digits (reserved). Add a letter or use a different length.",
+        { id: "display-name-eleven-digits" },
+      );
+      setEditDisplayName(next.length > 0 ? next.slice(0, -1) : "");
+      return;
+    }
+    setEditDisplayName(next);
+  };
+
   const saveDisplayName = async () => {
     if (!user?.id) return;
     const displayNameInput = editDisplayName.trim();
     if (!displayNameInput) {
       toast.error("Display name is required.");
+      return;
+    }
+    if (isElevenDigitDisplayName(displayNameInput)) {
+      toast.error(
+        "Display name cannot be exactly 11 digits (reserved). Add a letter or use a different length.",
+      );
       return;
     }
 
@@ -661,8 +681,8 @@ function ProfileInner() {
                       id="editDisplayName"
                       className="h-9 px-2 py-1 font-display font-semibold"
                       value={editDisplayName}
-                      onChange={(e) => setEditDisplayName(e.target.value)}
-                      autoComplete="name"
+                      onChange={handleEditDisplayNameChange}
+                      autoComplete="nickname"
                       autoFocus
                       onBlur={() => {
                         void saveDisplayName();

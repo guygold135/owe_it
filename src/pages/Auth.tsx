@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +7,7 @@ import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { consumeAuthRedirectError } from '@/lib/sessionBootstrap';
 import { APP_LOGO_SRC } from '@/lib/brandAssets';
+import { isElevenDigitDisplayName } from '@/lib/displayName';
 import { SmokeBackground } from '@/components/ui/spooky-smoke-animation';
 
 function GoogleLogo({ className = 'h-5 w-5' }: { className?: string }) {
@@ -40,6 +41,7 @@ export default function Auth() {
   const [emailPendingConfirmation, setEmailPendingConfirmation] = useState<string | null>(null);
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const displayNameInputRef = useRef<HTMLInputElement>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoadingProvider, setOauthLoadingProvider] = useState<'google' | null>(null);
@@ -65,13 +67,38 @@ export default function Auth() {
     }
   }, []);
 
+  /** Catches autofill / DOM–React drift: state must never stay as exactly 11 digits. */
+  useLayoutEffect(() => {
+    if (!isElevenDigitDisplayName(displayName)) return;
+    setDisplayName((d) => (d.length > 0 ? d.slice(0, -1) : ''));
+    toast.error(
+      'Display name cannot be exactly 11 digits (reserved). Add a letter or use a different length.',
+      { id: 'display-name-eleven-digits' },
+    );
+  }, [displayName]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const rawDisplayName =
+      mode === 'signup' && displayNameInputRef.current
+        ? displayNameInputRef.current.value
+        : displayName;
+    const signupName = String(rawDisplayName).trim();
+    if (mode === 'signup' && isElevenDigitDisplayName(signupName)) {
+      toast.error(
+        'Display name cannot be exactly 11 digits (reserved). Add a letter or use a different length.',
+      );
+      setDisplayName(signupName.length > 0 ? signupName.slice(0, -1) : '');
+      return;
+    }
+    if (mode === 'signup') {
+      setDisplayName(signupName);
+    }
     setLoading(true);
 
     try {
       if (mode === 'signup') {
-        const outcome = await signUp(email, password, displayName);
+        const outcome = await signUp(email, password, signupName);
         if (outcome === 'confirm_email') {
           toast.success('Check your email to confirm your account, then sign in here.');
           setMode('signin');
@@ -137,6 +164,31 @@ export default function Auth() {
     } finally {
       setResendConfirmBusy(false);
     }
+  };
+
+  const handleDisplayNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.value;
+    if (isElevenDigitDisplayName(next)) {
+      toast.error(
+        'Display name cannot be exactly 11 digits (reserved). Add a letter or use a different length.',
+        { id: 'display-name-eleven-digits' },
+      );
+      setDisplayName(next.length > 0 ? next.slice(0, -1) : '');
+      return;
+    }
+    setDisplayName(next);
+  };
+
+  const handleDisplayNameBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    let v = e.target.value;
+    if (isElevenDigitDisplayName(v)) {
+      toast.error(
+        'Display name cannot be exactly 11 digits (reserved). Add a letter or use a different length.',
+        { id: 'display-name-eleven-digits' },
+      );
+      v = v.slice(0, -1);
+    }
+    setDisplayName(v);
   };
 
   const handleOAuth = async (provider: 'google') => {
@@ -217,11 +269,16 @@ export default function Auth() {
                 transition={{ duration: 0.2 }}
               >
                 <Input
+                  ref={displayNameInputRef}
                   placeholder="Display name"
                   value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
+                  onChange={handleDisplayNameChange}
+                  onBlur={handleDisplayNameBlur}
                   className="bg-card border-border rounded-2xl h-12 px-4"
+                  autoComplete="nickname"
+                  minLength={1}
                   required
+                  inputMode="text"
                 />
               </motion.div>
             )}

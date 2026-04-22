@@ -334,8 +334,7 @@ export default function Settings() {
       </div>
 
       <div className="px-6 space-y-6">
-        {import.meta.env.DEV && (
-          <Button
+        <Button
             type="button"
             variant="outline"
             className="w-full rounded-xl border-dashed"
@@ -390,8 +389,7 @@ export default function Settings() {
             }}
           >
             Debug: trigger failed transfer on latest goal
-          </Button>
-        )}
+        </Button>
 
         <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
           <div>

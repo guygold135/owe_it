@@ -189,7 +189,7 @@ serve(async (req: Request): Promise<Response> => {
 
     const { data: goals, error: queryError } = await supabase
       .from("goals")
-      .select("id,payment_intent_id,payment_method_id,stripe_customer_id,payment_status,stake,stake_currency,charity_id,payment_retry_count,next_payment_retry_at")
+      .select("id,user_id,judge_user_id,title,payment_intent_id,payment_method_id,stripe_customer_id,payment_status,stake,stake_currency,charity_id,payment_retry_count,next_payment_retry_at")
       .eq("status", "failed")
       .in("payment_status", ["authorized", "stored_for_later_capture", "payment_failed"])
       .or(`next_payment_retry_at.is.null,next_payment_retry_at.lte.${new Date().toISOString()}`)
@@ -223,7 +223,29 @@ serve(async (req: Request): Promise<Response> => {
         if (result === "captured") captured += 1;
         else if (result === "already_captured") alreadyCaptured += 1;
         else if (result === "cancelled") cancelled += 1;
-        else if (result === "failed_needs_action") failedNeedsAction += 1;
+        else if (result === "failed_needs_action") {
+          failedNeedsAction += 1;
+          await supabase.from("in_app_notifications").insert([
+            {
+              user_id: goal.user_id,
+              kind: "payment_failed_goal_owner",
+              title: `Payment failed for an uncompleted goal - ${goal.title}`,
+              body: "",
+              goal_id: goalId,
+            },
+            ...(goal.judge_user_id
+              ? [
+                  {
+                    user_id: goal.judge_user_id,
+                    kind: "payment_failed_goal_judge",
+                    title: `Stake transfer failed - ${goal.title}`,
+                    body: "",
+                    goal_id: goalId,
+                  },
+                ]
+              : []),
+          ]);
+        }
         else skipped += 1;
         runDetails.push({ goal_id: goalId, result, error: null });
       } catch (err: unknown) {

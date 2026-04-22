@@ -492,6 +492,9 @@ export default function Friends() {
           </motion.div>
         )}
 
+        {friends.length > 0 && (
+          <p className="px-1 text-xs uppercase tracking-widest text-muted-foreground">My friends</p>
+        )}
         {friends.map((friend, i) => (
           <FriendCard
             key={friend.id}

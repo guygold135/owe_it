@@ -122,15 +122,25 @@ export function StakeCard({
 
   /** Remount border layer when accent changes so `pulse-border-accent` picks up new `--goal-border-accent`. */
   const accentSurfaceKey = goalOrganizer?.accent ?? 'default';
+  const hoverSurfaceStyle: CSSProperties = {
+    transform: 'translateZ(0)',
+    backfaceVisibility: 'hidden',
+    WebkitFontSmoothing: 'antialiased',
+  };
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={springTransition}
-      whileHover={organizerEditMode ? { scale: 1 } : { scale: 1.01 }}
-      whileTap={organizerEditMode ? { scale: 1 } : { scale: 0.99 }}
+      whileHover={
+        organizerEditMode
+          ? { y: 0, boxShadow: '0 0 0 rgba(0,0,0,0)' }
+          : { y: -3, boxShadow: '0 16px 36px rgba(0,0,0,0.18)' }
+      }
+      whileTap={organizerEditMode ? { y: 0 } : { y: -1 }}
       onClick={onClick}
+      style={hoverSurfaceStyle}
       className="relative rounded-[24px]"
     >
       <div

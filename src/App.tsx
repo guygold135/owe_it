@@ -19,12 +19,12 @@ import Settings from "./pages/Settings";
 import History from "./pages/History";
 import MyJudges from "./pages/MyJudges";
 import Profile from "./pages/Profile";
-import Feedback from "./pages/Feedback";
-import AdminFeedback from "./pages/AdminFeedback";
+import FeedbackRouter from "./pages/FeedbackRouter";
 import NotFound from "./pages/NotFound";
 import { JudgeRequestToastHost } from "@/components/JudgeRequestToastHost";
 import { JudgeGoalCreatedNoticeHost } from "@/components/JudgeGoalCreatedNoticeHost";
 import { DeadlineReminderToastHost } from "@/components/DeadlineReminderToastHost";
+import { RetryPaymentModalHost } from "@/components/RetryPaymentModalHost";
 import { FriendRequestToastHost } from "@/components/FriendRequestToastHost";
 import { AppVersionQuote } from "@/components/AppVersionQuote";
 import { PasswordRecoveryScreen } from "@/components/PasswordRecoveryScreen";
@@ -186,8 +186,8 @@ function LoggedInAppShell({
         <Route path="/history" element={<History />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/profile" element={<Profile />} />
-        <Route path="/feedback" element={<Feedback />} />
-        <Route path="/admin-feedback" element={<AdminFeedback />} />
+        <Route path="/feedback" element={<FeedbackRouter />} />
+        <Route path="/admin-feedback" element={<Navigate to="/feedback" replace />} />
         <Route path="/auth" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
@@ -206,6 +206,7 @@ function LoggedInAppShell({
       <JudgeRequestToastHost />
       <JudgeGoalCreatedNoticeHost />
       <DeadlineReminderToastHost />
+      <RetryPaymentModalHost />
     </div>
   );
 }

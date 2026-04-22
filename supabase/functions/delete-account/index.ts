@@ -131,6 +131,34 @@ serve(async (req: Request): Promise<Response> => {
       );
     }
 
+    const { data: ownActiveStakedGoals, error: ownActiveStakedGoalsError } = await admin
+      .from("goals")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .gt("stake", 0)
+      .limit(1);
+
+    if (ownActiveStakedGoalsError) {
+      console.error("delete-account own active staked goals check:", ownActiveStakedGoalsError.message);
+      return jsonResponse(
+        { error: "Could not verify your active staked goals. Try again in a moment." },
+        corsHeaders,
+        500,
+      );
+    }
+
+    if (ownActiveStakedGoals && ownActiveStakedGoals.length > 0) {
+      return jsonResponse(
+        {
+          error:
+            "You still have active staked goals. Resolve or finish those goals first, then try again.",
+        },
+        corsHeaders,
+        409,
+      );
+    }
+
     const purge = await purgePublicUserData(admin, userId);
     if (purge.error) {
       console.error("delete-account purge failed:", purge.error);

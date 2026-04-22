@@ -38,9 +38,9 @@ export default function MyJudges() {
             transition={{ delay: 0.1 }}
             className="mt-2 pr-2 text-xl font-display font-extrabold leading-snug tracking-tight text-balance text-foreground"
           >
-            Be the judge they can trust.
-            <br />
             Honest judgment builds real change.
+            <br />
+            Be the judge they can trust.
           </motion.h1>
         </div>
         <UserProfilePopover />

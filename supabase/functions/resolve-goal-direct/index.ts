@@ -28,9 +28,9 @@ async function settleFailedPayment(
     stripe_customer_id?: string | null;
     charity_id?: string | null;
   },
-) {
+): Promise<"captured" | "already_captured" | "cancelled" | "failed_needs_action" | "skipped"> {
   const stake = Number(goal.stake ?? 0);
-  if (stake <= 0) return;
+  if (stake <= 0) return "skipped";
 
   const piId = goal.payment_intent_id ?? null;
   if (piId) {
@@ -46,7 +46,7 @@ async function settleFailedPayment(
         .update({ payment_status: "captured" })
         .eq("id", goal.id);
       if (error) throw new Error(`Could not persist captured status: ${error.message}`);
-      return;
+      return pi.status === "succeeded" ? "already_captured" : "captured";
     }
     if (pi.status === "canceled") {
       const { error } = await supabase
@@ -54,15 +54,15 @@ async function settleFailedPayment(
         .update({ payment_status: "cancelled" })
         .eq("id", goal.id);
       if (error) throw new Error(`Could not persist cancelled status: ${error.message}`);
-      return;
+      return "cancelled";
     }
-    throw new Error(`Payment intent is not capturable (status: ${pi.status})`);
+    return "skipped";
   }
 
   const paymentMethodId = goal.payment_method_id ?? null;
   const customerId = goal.stripe_customer_id ?? null;
   if (!paymentMethodId || !customerId) {
-    throw new Error("Missing payment method for deferred charge");
+    return "skipped";
   }
 
   const deferredPi = await createFailedStakePaymentIntent(stripe, goal, {
@@ -72,7 +72,21 @@ async function settleFailedPayment(
   });
 
   if (deferredPi.status !== "succeeded") {
-    throw new Error(`Deferred capture failed (status: ${deferredPi.status})`);
+    if (deferredPi.status === "requires_action" || deferredPi.status === "requires_payment_method") {
+      const retries = 1;
+      const nextRetryAt = new Date(Date.now() + Math.min(24, 2 ** retries) * 60 * 60 * 1000).toISOString();
+      await supabase
+        .from("goals")
+        .update({
+          payment_status: "payment_failed",
+          payment_retry_count: retries,
+          next_payment_retry_at: nextRetryAt,
+          last_payment_error: `Deferred charge status: ${deferredPi.status}`,
+        })
+        .eq("id", goal.id);
+      return "failed_needs_action";
+    }
+    return "skipped";
   }
 
   const { error } = await supabase
@@ -83,6 +97,7 @@ async function settleFailedPayment(
     })
     .eq("id", goal.id);
   if (error) throw new Error(`Could not persist deferred capture: ${error.message}`);
+  return "captured";
 }
 
 async function getAuthenticatedUserId(req: Request): Promise<string | null> {
@@ -94,6 +109,35 @@ async function getAuthenticatedUserId(req: Request): Promise<string | null> {
   const { data: { user }, error } = await authClient.auth.getUser(token);
   if (error || !user?.id) return null;
   return user.id;
+}
+
+async function notifyPaymentFailure(
+  supabase: ReturnType<typeof createClient>,
+  goal: { id: string; title: string; user_id: string; judge_user_id?: string | null; stake?: number | null },
+) {
+  const ownerTitle = `Payment failed for an uncompleted goal - ${goal.title}`;
+  const judgeTitle = `Stake transfer failed - ${goal.title}`;
+
+  await supabase.from("in_app_notifications").insert([
+    {
+      user_id: goal.user_id,
+      kind: "payment_failed_goal_owner",
+      title: ownerTitle,
+      body: "",
+      goal_id: goal.id,
+    },
+    ...(goal.judge_user_id
+      ? [
+          {
+            user_id: goal.judge_user_id,
+            kind: "payment_failed_goal_judge",
+            title: judgeTitle,
+            body: "",
+            goal_id: goal.id,
+          },
+        ]
+      : []),
+  ]);
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -180,9 +224,11 @@ serve(async (req: Request): Promise<Response> => {
     const stake = Number(goal.stake ?? 0);
 
     // Settle payment if needed
+    let failedNeedsAction = false;
     if (stake > 0) {
       if (outcome === "failed") {
-        await settleFailedPayment(stripe, supabase, goal);
+        const paymentResult = await settleFailedPayment(stripe, supabase, goal);
+        failedNeedsAction = paymentResult === "failed_needs_action";
       } else {
         const piId = goal.payment_intent_id as string | null;
         if (!piId) {
@@ -207,6 +253,10 @@ serve(async (req: Request): Promise<Response> => {
       .eq("id", goal.id);
 
     if (updateError) return jsonOk({ success: false, error: "Could not update goal" });
+
+    if (outcome === "failed" && failedNeedsAction) {
+      await notifyPaymentFailure(supabase, goal);
+    }
 
     // Social Pulse event (skip private goals)
     if (!goal.is_private) {

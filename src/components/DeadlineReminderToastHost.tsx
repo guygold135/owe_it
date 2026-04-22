@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
+import { TriangleAlert } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -21,6 +22,7 @@ export function DeadlineReminderToastHost() {
   const userId = user?.id;
   const seenRef = useRef<Set<string>>(new Set());
   const dismissedRef = useRef<Set<string>>(new Set());
+  const temporaryHideRef = useRef<Set<string>>(new Set());
 
   const dismissedStorageKey = userId ? `in_app_notification_dismissed:${userId}` : null;
 
@@ -133,6 +135,79 @@ export function DeadlineReminderToastHost() {
     });
   };
 
+  const showPaymentFailedToast = (row: { id: string; title?: string; body?: string; kind?: string; goalId?: string | null }) => {
+    if (dismissedRef.current.has(row.id)) return;
+    const isOwner = row.kind === 'payment_failed_goal_owner';
+    const extractedGoalName =
+      typeof row.body === 'string' ? row.body.match(/"([^"]+)"/)?.[1]?.trim() : null;
+    const baseTitle = row.title ?? 'Stake transfer failed';
+    const titleWithGoal =
+      extractedGoalName && !baseTitle.toLowerCase().includes(extractedGoalName.toLowerCase())
+        ? `${baseTitle} - ${extractedGoalName}`
+        : baseTitle;
+    const titlePrefix = 'Payment failed';
+    const startsWithPrefix = titleWithGoal.toLowerCase().startsWith(titlePrefix.toLowerCase());
+    const titleSuffixRaw = startsWithPrefix ? titleWithGoal.slice(titlePrefix.length) : titleWithGoal;
+    const titleSuffix = titleSuffixRaw.replace(/\bfor an uncompleted goal\b/i, 'for uncompleted goal');
+
+    toast.error(
+      startsWithPrefix ? (
+        <span>
+          <span className="font-extrabold text-warning">{titlePrefix}</span>
+          <br />
+          <span>{titleSuffix}</span>
+        </span>
+      ) : (
+        <span className="font-extrabold text-warning">{titleWithGoal}</span>
+      ),
+      {
+      id: `payment_failed_${row.id}`,
+      description: undefined,
+      icon: <TriangleAlert className="w-5 h-5 text-warning shrink-0 mt-0.5" aria-hidden />,
+      duration: Number.POSITIVE_INFINITY,
+      closeButton: true,
+      closeButtonAriaLabel: 'Dismiss message',
+      action: isOwner
+        ? {
+            label: 'Fix card',
+            onClick: () => {
+              temporaryHideRef.current.add(row.id);
+              toast.dismiss(`payment_failed_${row.id}`);
+              const payload = {
+                notificationId: row.id,
+                goalId: row.goalId ?? null,
+                kind: row.kind ?? null,
+                title: titleWithGoal,
+              };
+              window.dispatchEvent(
+                new CustomEvent('open-retry-payment-window', {
+                  detail: payload,
+                }),
+              );
+            },
+          }
+        : undefined,
+      onDismiss: () => {
+        // When user presses "Fix card", we temporarily hide the toast while the modal is open.
+        // That should not count as an actual dismiss/read.
+        if (temporaryHideRef.current.has(row.id)) {
+          temporaryHideRef.current.delete(row.id);
+          return;
+        }
+        window.dispatchEvent(
+          new CustomEvent('confirm-dismiss-payment-failed', {
+            detail: {
+              notificationId: row.id,
+              goalId: row.goalId ?? null,
+              kind: row.kind ?? null,
+              title: titleWithGoal,
+            },
+          }),
+        );
+      },
+    });
+  };
+
   useEffect(() => {
     if (!userId) return;
     seenRef.current.clear();
@@ -143,7 +218,12 @@ export function DeadlineReminderToastHost() {
         .from('in_app_notifications')
         .select('id,kind,title,body,goal_id')
         .eq('user_id', userId)
-        .in('kind', ['pulse_friend_congrats', 'achievement_earned'])
+        .in('kind', [
+          'pulse_friend_congrats',
+          'achievement_earned',
+          'payment_failed_goal_owner',
+          'payment_failed_goal_judge',
+        ])
         .is('read_at', null)
         .order('created_at', { ascending: true })
         .limit(20);
@@ -157,6 +237,8 @@ export function DeadlineReminderToastHost() {
         seenRef.current.add(row.id);
         if (row.kind === 'achievement_earned') {
           showAchievementToast({ id: row.id, title: row.title, body: row.body });
+        } else if (row.kind === 'payment_failed_goal_owner' || row.kind === 'payment_failed_goal_judge') {
+          showPaymentFailedToast({ id: row.id, title: row.title, body: row.body, kind: row.kind, goalId: row.goal_id });
         } else {
           showPulseCongratsToast({ id: row.id, title: row.title, body: row.body });
         }
@@ -194,6 +276,12 @@ export function DeadlineReminderToastHost() {
             if (seenRef.current.has(row.id)) return;
             seenRef.current.add(row.id);
             showAchievementToast({ id: row.id, title: row.title, body: row.body });
+            return;
+          }
+          if (row.kind === 'payment_failed_goal_owner' || row.kind === 'payment_failed_goal_judge') {
+            if (seenRef.current.has(row.id)) return;
+            seenRef.current.add(row.id);
+            showPaymentFailedToast({ id: row.id, title: row.title, body: row.body, kind: row.kind, goalId: row.goal_id });
             return;
           }
 
@@ -243,6 +331,36 @@ export function DeadlineReminderToastHost() {
       void supabase.removeChannel(channel);
     };
   }, [userId]);
+
+  useEffect(() => {
+    const onRetryWindowCancelled = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        notificationId?: string | null;
+        goalId?: string | null;
+        kind?: string | null;
+        title?: string | null;
+      }>;
+      const notificationId = customEvent.detail?.notificationId ?? null;
+      if (!notificationId) return;
+      try {
+        window.sessionStorage.removeItem('pending_retry_payment_toast_payload');
+      } catch {
+        // Ignore storage failures.
+      }
+      showPaymentFailedToast({
+        id: notificationId,
+        goalId: customEvent.detail?.goalId ?? null,
+        kind: customEvent.detail?.kind ?? undefined,
+        title: customEvent.detail?.title ?? undefined,
+        body: '',
+      });
+    };
+
+    window.addEventListener('retry-payment-window-cancelled', onRetryWindowCancelled as EventListener);
+    return () => {
+      window.removeEventListener('retry-payment-window-cancelled', onRetryWindowCancelled as EventListener);
+    };
+  }, []);
 
   return null;
 }

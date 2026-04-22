@@ -1,11 +1,9 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import UserProfilePopover from "@/components/UserProfilePopover";
-import { useAuth } from "@/hooks/useAuth";
 
 const SUBJECT_OPTIONS = [
   "Improvement idea",
@@ -18,17 +16,6 @@ const SUBJECT_OPTIONS = [
 ] as const;
 
 export default function Feedback() {
-  const { user } = useAuth();
-  const isAdminViewer = useMemo(() => {
-    const adminId = import.meta.env.VITE_ADMIN_USER_ID as string | undefined;
-    const adminEmail = import.meta.env.VITE_ADMIN_EMAIL as string | undefined;
-    if (!user) return false;
-    if (adminId && user.id === adminId) return true;
-    if (adminEmail && user.email?.toLowerCase() === adminEmail.trim().toLowerCase()) {
-      return true;
-    }
-    return false;
-  }, [user]);
   const [subjectType, setSubjectType] = useState<(typeof SUBJECT_OPTIONS)[number] | "">("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -91,19 +78,6 @@ export default function Feedback() {
         </div>
         <UserProfilePopover />
       </div>
-
-      {user && isAdminViewer ? (
-        <div className="px-6 pb-4">
-          <div className="rounded-2xl border border-primary/40 bg-primary/5 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <p className="text-sm text-foreground">
-              <span className="font-semibold">Admin:</span> submissions live on a separate page (not this form).
-            </p>
-            <Button asChild variant="secondary" size="sm" className="shrink-0">
-              <Link to="/admin-feedback">Open admin inbox</Link>
-            </Button>
-          </div>
-        </div>
-      ) : null}
 
       <div className="px-6">
         <div className="p-4 rounded-2xl bg-card border border-border space-y-4">

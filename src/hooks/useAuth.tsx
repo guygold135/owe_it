@@ -9,7 +9,7 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { isElevenDigitDisplayName } from '@/lib/displayName';
 
-type AuthUser = {
+export type AuthUser = {
   id: string;
   email: string;
   displayName?: string;

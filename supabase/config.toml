@@ -26,3 +26,9 @@ verify_jwt = false
 
 [functions.admin-feedback]
 verify_jwt = false
+
+[functions.retry-failed-goal-payment]
+verify_jwt = false
+
+[functions.debug-trigger-payment-failed-alert]
+verify_jwt = false

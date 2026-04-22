@@ -334,62 +334,64 @@ export default function Settings() {
       </div>
 
       <div className="px-6 space-y-6">
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full rounded-xl border-dashed"
-          onClick={async () => {
-            let {
-              data: { session },
-            } = await supabase.auth.getSession();
-            if (!session?.access_token) {
-              const refreshResult = await supabase.auth.refreshSession();
-              session = refreshResult.data.session;
-            }
-            const accessToken = String(session?.access_token ?? '').trim().replace(/^Bearer\s+/i, '');
-            if (!accessToken) {
-              toast.error('Session expired. Please sign in again.');
-              return;
-            }
+        {import.meta.env.DEV && (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full rounded-xl border-dashed"
+            onClick={async () => {
+              let {
+                data: { session },
+              } = await supabase.auth.getSession();
+              if (!session?.access_token) {
+                const refreshResult = await supabase.auth.refreshSession();
+                session = refreshResult.data.session;
+              }
+              const accessToken = String(session?.access_token ?? '').trim().replace(/^Bearer\s+/i, '');
+              if (!accessToken) {
+                toast.error('Session expired. Please sign in again.');
+                return;
+              }
 
-            const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-            const apikey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
-            if (!supabaseUrl || !apikey) {
-              toast.error('Supabase env is missing in app configuration.');
-              return;
-            }
+              const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+              const apikey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+              if (!supabaseUrl || !apikey) {
+                toast.error('Supabase env is missing in app configuration.');
+                return;
+              }
 
-            const res = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/debug-trigger-payment-failed-alert`, {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                apikey,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({}),
-            });
+              const res = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/debug-trigger-payment-failed-alert`, {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                  apikey,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({}),
+              });
 
-            const raw = await res.text();
-            let parsed: { success?: boolean; error?: string } | null = null;
-            try {
-              parsed = raw ? JSON.parse(raw) : null;
-            } catch {
-              parsed = null;
-            }
+              const raw = await res.text();
+              let parsed: { success?: boolean; error?: string } | null = null;
+              try {
+                parsed = raw ? JSON.parse(raw) : null;
+              } catch {
+                parsed = null;
+              }
 
-            if (!res.ok || parsed?.success === false) {
-              toast.error(parsed?.error ?? raw?.trim() ?? `Debug trigger failed (${res.status}).`);
-              return;
-            }
-            toast.success('Debug payment-failed flow triggered.');
-            await Promise.all([
-              queryClient.invalidateQueries({ queryKey: queryKeys.goals(user?.id ?? '') }),
-              queryClient.invalidateQueries({ queryKey: queryKeys.goalsAsJudge(user?.id ?? '') }),
-            ]);
-          }}
-        >
-          Debug: trigger failed transfer on latest goal
-        </Button>
+              if (!res.ok || parsed?.success === false) {
+                toast.error(parsed?.error ?? raw?.trim() ?? `Debug trigger failed (${res.status}).`);
+                return;
+              }
+              toast.success('Debug payment-failed flow triggered.');
+              await Promise.all([
+                queryClient.invalidateQueries({ queryKey: queryKeys.goals(user?.id ?? '') }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.goalsAsJudge(user?.id ?? '') }),
+              ]);
+            }}
+          >
+            Debug: trigger failed transfer on latest goal
+          </Button>
+        )}
 
         <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
           <div>

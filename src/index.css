@@ -81,13 +81,22 @@
 
   html,
   body {
-    /* Prevent mobile "rubber-band" bounce on non-scrollable screens. */
-    overscroll-behavior-y: none;
+    /* Keep native pull-to-refresh behavior enabled. */
+    overscroll-behavior-y: auto;
   }
 
   body {
     @apply bg-background text-foreground font-body antialiased;
     overflow-y: auto;
+  }
+
+  /* Avoid tiny phantom scroll on mobile caused by 100vh browser chrome changes. */
+  #root {
+    min-height: 100dvh;
+  }
+
+  .min-h-screen {
+    min-height: 100dvh;
   }
 
   h1, h2, h3, h4, h5, h6 {

@@ -1191,8 +1191,12 @@ export default function Dashboard() {
                   <div className="pointer-events-none absolute inset-0 z-[35] overflow-visible" aria-hidden>
                     <svg
                       viewBox={`0 0 ${Math.max(emptyStateArrowCanvas.w, 1)} ${Math.max(emptyStateArrowCanvas.h, 1)}`}
-                      className="h-full w-full overflow-visible opacity-90"
-                      preserveAspectRatio="none"
+                      className="overflow-visible opacity-90"
+                      style={{
+                        width: `${Math.max(emptyStateArrowCanvas.w, 1)}px`,
+                        height: `${Math.max(emptyStateArrowCanvas.h, 1)}px`,
+                      }}
+                      preserveAspectRatio="xMinYMin meet"
                     >
                       <defs>
                         <marker

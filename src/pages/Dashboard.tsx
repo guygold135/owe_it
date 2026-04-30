@@ -474,11 +474,12 @@ export default function Dashboard() {
   const contractGoals = useDashboardVisibleContracts(goals);
   const spotlightGoalIds = useMemo(() => new Set(spotlightGoals.map((g) => g.id)), [spotlightGoals]);
   const [tutorialDeleteGoalId, setTutorialDeleteGoalId] = useState<string | null>(null);
+  const emptyStateHintRef = useRef<HTMLDivElement | null>(null);
   const emptyStateInlinePlusRef = useRef<HTMLSpanElement | null>(null);
   const [emptyStateArrowPath, setEmptyStateArrowPath] = useState<string>('');
-  const [arrowViewport, setArrowViewport] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const [emptyStateArrowCanvas, setEmptyStateArrowCanvas] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const emptyStateArrowPathRef = useRef('');
-  const arrowViewportRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
+  const emptyStateArrowCanvasRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
   const sortedContractGoals = useMemo(
     () =>
       [...contractGoals]
@@ -503,35 +504,28 @@ export default function Dashboard() {
     let rafId = 0;
     const updateArrow = () => {
       const startEl = emptyStateInlinePlusRef.current;
+      const hintEl = emptyStateHintRef.current;
       const endEl = document.querySelector('[data-create-goal-fab="true"]') as HTMLElement | null;
       const navInnerEl = document.querySelector('[data-bottom-nav-inner="true"]') as HTMLElement | null;
-      if (!startEl || !endEl) {
+      if (!startEl || !hintEl || !endEl) {
+        emptyStateArrowPathRef.current = '';
         setEmptyStateArrowPath('');
         return;
       }
 
       const start = startEl.getBoundingClientRect();
+      const hint = hintEl.getBoundingClientRect();
       const end = endEl.getBoundingClientRect();
-      const viewport = window.visualViewport;
-      const viewportOffsetX = viewport?.offsetLeft ?? 0;
-      const viewportOffsetY = viewport?.offsetTop ?? 0;
-      const w = viewport?.width ?? window.innerWidth;
-      const h = viewport?.height ?? window.innerHeight;
-      if (arrowViewportRef.current.w !== w || arrowViewportRef.current.h !== h) {
-        arrowViewportRef.current = { w, h };
-        setArrowViewport({ w, h });
-      }
-
-      // Start below the inline + badge, go down first so it doesn't cross hint text.
-      const sx = start.left + start.width / 2 + viewportOffsetX;
-      const sy = start.top + start.height + 10 + viewportOffsetY;
-      const ex = end.left + end.width / 2 + viewportOffsetX;
+      // Anchor path in empty-hint local coordinates so the whole curve moves with the block.
+      const sx = start.left + start.width / 2 - hint.left;
+      const sy = start.top + start.height + 10 - hint.top;
+      const ex = end.left + end.width / 2 - hint.left;
       const navTop = navInnerEl?.getBoundingClientRect().top ?? end.top;
       // Hard cap so no part of the arrow can touch/cross the nav container.
-      const bottomLimit = navTop - 16 + viewportOffsetY;
+      const bottomLimit = navTop - 16 - hint.top;
       const clampY = (y: number) => Math.min(y, bottomLimit);
       // End above the fixed bottom nav so the arrow does not touch it.
-      const ey = clampY(end.top - 18 + viewportOffsetY);
+      const ey = clampY(end.top - 18 - hint.top);
 
       // Continuous cubic chain with tangent continuity, so the curve stays smooth near the bottom nav.
       const p0 = { x: sx, y: sy };
@@ -563,6 +557,18 @@ export default function Dashboard() {
       if (emptyStateArrowPathRef.current !== d) {
         emptyStateArrowPathRef.current = d;
         setEmptyStateArrowPath(d);
+      }
+
+      const nextCanvas = {
+        w: Math.max(Math.ceil(hint.width), Math.ceil(ex + 48), Math.ceil(sx + 120), 1),
+        h: Math.max(Math.ceil(hint.height), Math.ceil(ey + 48), Math.ceil(sy + 180), 1),
+      };
+      if (
+        emptyStateArrowCanvasRef.current.w !== nextCanvas.w ||
+        emptyStateArrowCanvasRef.current.h !== nextCanvas.h
+      ) {
+        emptyStateArrowCanvasRef.current = nextCanvas;
+        setEmptyStateArrowCanvas(nextCanvas);
       }
     };
 
@@ -1169,7 +1175,7 @@ export default function Dashboard() {
             <ResolvedGoalSpotlight goals={spotlightGoals} />
             {showEmptyHint ? (
               <>
-                <div className="text-center pt-2 pb-10">
+                <div ref={emptyStateHintRef} className="relative text-center pt-2 pb-10">
                   <p className="text-muted-foreground">no active goals</p>
                   <p className="text-sm text-muted-foreground mt-1">
                     tap{' '}
@@ -1181,41 +1187,40 @@ export default function Dashboard() {
                     </span>{' '}
                     to creat a goal!
                   </p>
-                </div>
-
-                {/* Empty-state hint: polished looping arrow toward the create-goal FAB. */}
-                <div className="pointer-events-none fixed inset-0 z-[35]" aria-hidden>
-                  <svg
-                    viewBox={`0 0 ${Math.max(arrowViewport.w, 1)} ${Math.max(arrowViewport.h, 1)}`}
-                    className="h-full w-full opacity-90"
-                    preserveAspectRatio="none"
-                  >
-                    <defs>
-                      <marker
-                        id="dashboard-empty-goals-arrowhead"
-                        viewBox="0 0 12 12"
-                        refX="10.5"
-                        refY="6"
-                        markerWidth="5"
-                        markerHeight="5"
-                        orient="auto"
-                      >
-                        <path d="M 0 0 L 12 6 L 0 12 z" fill="hsl(var(--primary))" />
-                      </marker>
-                    </defs>
-                    {emptyStateArrowPath ? (
-                      <path
-                        d={emptyStateArrowPath}
-                        fill="none"
-                        stroke="hsl(var(--primary))"
-                        strokeWidth="1.35"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        vectorEffect="non-scaling-stroke"
-                        markerEnd="url(#dashboard-empty-goals-arrowhead)"
-                      />
-                    ) : null}
-                  </svg>
+                  {/* Empty-state hint arrow is defined inside this block so it stays attached while scrolling. */}
+                  <div className="pointer-events-none absolute inset-0 z-[35] overflow-visible" aria-hidden>
+                    <svg
+                      viewBox={`0 0 ${Math.max(emptyStateArrowCanvas.w, 1)} ${Math.max(emptyStateArrowCanvas.h, 1)}`}
+                      className="h-full w-full overflow-visible opacity-90"
+                      preserveAspectRatio="none"
+                    >
+                      <defs>
+                        <marker
+                          id="dashboard-empty-goals-arrowhead"
+                          viewBox="0 0 12 12"
+                          refX="10.5"
+                          refY="6"
+                          markerWidth="5"
+                          markerHeight="5"
+                          orient="auto"
+                        >
+                          <path d="M 0 0 L 12 6 L 0 12 z" fill="hsl(var(--primary))" />
+                        </marker>
+                      </defs>
+                      {emptyStateArrowPath ? (
+                        <path
+                          d={emptyStateArrowPath}
+                          fill="none"
+                          stroke="hsl(var(--primary))"
+                          strokeWidth="1.35"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          vectorEffect="non-scaling-stroke"
+                          markerEnd="url(#dashboard-empty-goals-arrowhead)"
+                        />
+                      ) : null}
+                    </svg>
+                  </div>
                 </div>
               </>
             ) : (

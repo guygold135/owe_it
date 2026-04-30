@@ -73,8 +73,21 @@
     @apply border-border;
   }
 
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  html,
+  body {
+    /* Prevent mobile "rubber-band" bounce on non-scrollable screens. */
+    overscroll-behavior-y: none;
+  }
+
   body {
     @apply bg-background text-foreground font-body antialiased;
+    overflow-y: auto;
   }
 
   h1, h2, h3, h4, h5, h6 {

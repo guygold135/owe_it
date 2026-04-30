@@ -477,6 +477,8 @@ export default function Dashboard() {
   const emptyStateInlinePlusRef = useRef<HTMLSpanElement | null>(null);
   const [emptyStateArrowPath, setEmptyStateArrowPath] = useState<string>('');
   const [arrowViewport, setArrowViewport] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const emptyStateArrowPathRef = useRef('');
+  const arrowViewportRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
   const sortedContractGoals = useMemo(
     () =>
       [...contractGoals]
@@ -493,6 +495,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!showEmptyHint) {
+      emptyStateArrowPathRef.current = '';
       setEmptyStateArrowPath('');
       return;
     }
@@ -514,7 +517,10 @@ export default function Dashboard() {
       const viewportOffsetY = viewport?.offsetTop ?? 0;
       const w = viewport?.width ?? window.innerWidth;
       const h = viewport?.height ?? window.innerHeight;
-      setArrowViewport({ w, h });
+      if (arrowViewportRef.current.w !== w || arrowViewportRef.current.h !== h) {
+        arrowViewportRef.current = { w, h };
+        setArrowViewport({ w, h });
+      }
 
       // Start below the inline + badge, go down first so it doesn't cross hint text.
       const sx = start.left + start.width / 2 + viewportOffsetX;
@@ -554,31 +560,30 @@ export default function Dashboard() {
         `C ${c1d.x} ${c1d.y}, ${c2d.x} ${c2d.y}, ${p4.x} ${p4.y}`,
       ].join(' ');
 
-      setEmptyStateArrowPath(d);
+      if (emptyStateArrowPathRef.current !== d) {
+        emptyStateArrowPathRef.current = d;
+        setEmptyStateArrowPath(d);
+      }
     };
 
-    const schedule = () => {
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(updateArrow);
+    const frameLoop = () => {
+      updateArrow();
+      rafId = requestAnimationFrame(frameLoop);
     };
 
-    schedule();
-    window.addEventListener('resize', schedule);
-    window.addEventListener('scroll', schedule, { passive: true });
-    window.visualViewport?.addEventListener('resize', schedule);
-    window.visualViewport?.addEventListener('scroll', schedule);
+    frameLoop();
+    window.addEventListener('resize', updateArrow);
+    window.visualViewport?.addEventListener('resize', updateArrow);
     // On refresh, BottomNav/FAB can mount slightly after the empty-state block.
     // Observe DOM mutations so the arrow draws as soon as both anchors exist.
     const observer = new MutationObserver(() => {
-      schedule();
+      updateArrow();
     });
     observer.observe(document.body, { childList: true, subtree: true, attributes: true });
     return () => {
       cancelAnimationFrame(rafId);
-      window.removeEventListener('resize', schedule);
-      window.removeEventListener('scroll', schedule);
-      window.visualViewport?.removeEventListener('resize', schedule);
-      window.visualViewport?.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', updateArrow);
+      window.visualViewport?.removeEventListener('resize', updateArrow);
       observer.disconnect();
     };
   }, [showEmptyHint]);

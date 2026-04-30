@@ -8,12 +8,13 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Plus } from 'lucide-react';
-import { TutorialCard, TutorialStepDots } from '@/components/TutorialCard';
+import { TutorialCard } from '@/components/TutorialCard';
 import { useAppTutorial } from '@/hooks/useAppTutorial';
 
 export function AppTutorialChrome({ onCloseCreateSheet }: { onCloseCreateSheet: () => void }) {
   const {
     phase,
+    tutorialBootBlocking,
     tutorialActive,
     fabSpotlight,
     onWelcomeContinue,
@@ -31,19 +32,20 @@ export function AppTutorialChrome({ onCloseCreateSheet }: { onCloseCreateSheet: 
     onCloseCreateSheet();
   };
 
+  if (tutorialBootBlocking) {
+    return <div className="fixed inset-0 z-[120] bg-background" aria-hidden />;
+  }
+
   if (!tutorialActive) return null;
 
   return (
     <>
       <AlertDialog open={phase === 'welcome'}>
-        <AlertDialogContent className="max-w-xl rounded-3xl border border-white/10 bg-[#141414] p-6 pt-5 text-foreground shadow-xl sm:p-7 sm:pt-6">
+        <AlertDialogContent
+          overlayClassName="bg-background"
+          className="max-w-xl rounded-3xl border border-white/10 bg-[#141414] p-6 pt-5 text-foreground shadow-xl sm:p-7 sm:pt-6"
+        >
           <AlertDialogHeader className="space-y-3 text-center sm:text-center">
-            <div className="flex flex-col items-center gap-3">
-              <TutorialStepDots current={progressCurrent} total={progressTotal} thick className="mb-0 w-full" />
-              <p className="text-xs font-medium tracking-wide text-zinc-400">
-                Step {progressCurrent} of {progressTotal}
-              </p>
-            </div>
             <AlertDialogTitle className="font-display text-center text-xl text-foreground">
               Welcome to Owe It!
             </AlertDialogTitle>
@@ -52,9 +54,9 @@ export function AppTutorialChrome({ onCloseCreateSheet }: { onCloseCreateSheet: 
               className="text-center text-base font-medium leading-relaxed text-pretty text-foreground sm:text-lg"
             >
               <p>
-                We want to help you fulfill your goals by fully committing.
+                if you got here then you are ready to commit.
                 <br />
-                Let&apos;s show you how it goes.
+                press the continue button if that is the case.
               </p>
             </AlertDialogDescription>
           </AlertDialogHeader>

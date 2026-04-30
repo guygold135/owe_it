@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider, useIsFetching } from "@tanstack/react-query";
 import { Capacitor } from '@capacitor/core';
 import { BrowserRouter, HashRouter, Route, Routes, Navigate } from "react-router-dom";
@@ -6,27 +6,15 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BottomNav } from "@/components/BottomNav";
-import { CreateGoalSheet } from "@/components/CreateGoalSheet";
 import { AppTutorialChrome } from "@/components/AppTutorialChrome";
 import { AppTutorialProvider, useAppTutorial } from "@/hooks/useAppTutorial";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { useAbandonStaleJudgeRequestsOnBootstrap } from "@/hooks/useAbandonStaleJudgeRequestsOnBootstrap";
-import Dashboard from "./pages/Dashboard";
-import Pulse from "./pages/Pulse";
-import Friends from "./pages/Friends";
-import Auth from "./pages/Auth";
-import Settings from "./pages/Settings";
-import History from "./pages/History";
-import MyJudges from "./pages/MyJudges";
-import Profile from "./pages/Profile";
-import FeedbackRouter from "./pages/FeedbackRouter";
-import NotFound from "./pages/NotFound";
 import { JudgeRequestToastHost } from "@/components/JudgeRequestToastHost";
 import { JudgeGoalCreatedNoticeHost } from "@/components/JudgeGoalCreatedNoticeHost";
 import { DeadlineReminderToastHost } from "@/components/DeadlineReminderToastHost";
 import { RetryPaymentModalHost } from "@/components/RetryPaymentModalHost";
 import { FriendRequestToastHost } from "@/components/FriendRequestToastHost";
-import { AppVersionQuote } from "@/components/AppVersionQuote";
 import { PasswordRecoveryScreen } from "@/components/PasswordRecoveryScreen";
 import { APP_LOGO_SRC } from "@/lib/brandAssets";
 
@@ -40,6 +28,21 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Pulse = lazy(() => import("./pages/Pulse"));
+const Friends = lazy(() => import("./pages/Friends"));
+const Auth = lazy(() => import("./pages/Auth"));
+const Settings = lazy(() => import("./pages/Settings"));
+const History = lazy(() => import("./pages/History"));
+const MyJudges = lazy(() => import("./pages/MyJudges"));
+const Profile = lazy(() => import("./pages/Profile"));
+const Help = lazy(() => import("./pages/Help"));
+const FeedbackRouter = lazy(() => import("./pages/FeedbackRouter"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const CreateGoalSheet = lazy(() =>
+  import("@/components/CreateGoalSheet").then((mod) => ({ default: mod.CreateGoalSheet })),
+);
 
 function BootstrapLogoScreen() {
   return (
@@ -65,6 +68,21 @@ function BootstrapLogoScreen() {
       <p className="text-xs font-medium tracking-widest text-muted-foreground/60 uppercase">
         Loading
       </p>
+    </div>
+  );
+}
+
+function RouteLoadingScreen() {
+  // Used during in-app navigation when lazy-loaded routes are fetching.
+  // Intentionally NOT the big logo loader.
+  return (
+    <div className="min-h-[calc(100vh-5rem)] flex flex-col justify-center px-6">
+      <div className="max-w-sm mx-auto w-full space-y-4">
+        <div className="h-28 rounded-[24px] bg-muted/50 animate-pulse border border-border/40" />
+        <div className="h-10 rounded-[20px] bg-muted/40 animate-pulse border border-border/40" />
+        <div className="h-24 rounded-[20px] bg-muted/50 animate-pulse border border-border/40" />
+        <div className="h-24 rounded-[20px] bg-muted/50 animate-pulse border border-border/40" />
+      </div>
     </div>
   );
 }
@@ -116,10 +134,12 @@ function AppRoutes() {
 
   if (!user) {
     return (
-      <Routes>
-        <Route path="/auth" element={<Auth />} />
-        <Route path="*" element={<Navigate to="/auth" replace />} />
-      </Routes>
+      <Suspense fallback={<BootstrapLogoScreen />}>
+        <Routes>
+          <Route path="/auth" element={<Auth />} />
+          <Route path="*" element={<Navigate to="/auth" replace />} />
+        </Routes>
+      </Suspense>
     );
   }
 
@@ -146,13 +166,39 @@ function LoggedInAppShell({
   createOpen: boolean;
   setCreateOpen: (v: boolean) => void;
 }) {
-  const { fabSpotlight, onFabPhaseCreateOpened, highlightNavTab } = useAppTutorial();
+  const { phase, tutorialBootBlocking, fabSpotlight, onFabPhaseCreateOpened, highlightNavTab } = useAppTutorial();
   const isFetching = useIsFetching();
   const [showShellSplash, setShowShellSplash] = useState(() =>
     typeof window !== 'undefined' ? sessionStorage.getItem(SHELL_SPLASH_KEY) !== '1' : false,
   );
   const [shellSplashMinElapsed, setShellSplashMinElapsed] = useState(false);
   const [shellSplashMaxElapsed, setShellSplashMaxElapsed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const preloadCreateSheet = () => {
+      if (cancelled) return;
+      void import('@/components/CreateGoalSheet');
+    };
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      const idleId = (window as Window & { requestIdleCallback: (cb: () => void) => number }).requestIdleCallback(
+        preloadCreateSheet,
+      );
+      return () => {
+        cancelled = true;
+        if ('cancelIdleCallback' in window) {
+          (window as Window & { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(idleId);
+        }
+      };
+    }
+
+    const timer = window.setTimeout(preloadCreateSheet, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!showShellSplash) return;
@@ -176,31 +222,45 @@ function LoggedInAppShell({
     return <BootstrapLogoScreen />;
   }
 
+  const hideAppBehindWelcome = tutorialBootBlocking || phase === 'welcome';
+
   return (
     <div className="max-w-lg mx-auto relative">
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/pulse" element={<Pulse />} />
-        <Route path="/friends" element={<Friends />} />
-        <Route path="/my-judges" element={<MyJudges />} />
-        <Route path="/history" element={<History />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/feedback" element={<FeedbackRouter />} />
-        <Route path="/admin-feedback" element={<Navigate to="/feedback" replace />} />
-        <Route path="/auth" element={<Navigate to="/" replace />} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-      <BottomNav
-        fabTutorialSpotlight={fabSpotlight}
-        highlightTab={highlightNavTab}
-        tabTourBlocking={Boolean(highlightNavTab)}
-        onCreateGoal={() => {
-          if (fabSpotlight) onFabPhaseCreateOpened();
-          else setCreateOpen(true);
-        }}
-      />
-      <CreateGoalSheet open={createOpen} onClose={() => setCreateOpen(false)} />
+      <div
+        aria-hidden={hideAppBehindWelcome || undefined}
+        className={hideAppBehindWelcome ? 'pointer-events-none select-none opacity-0' : undefined}
+      >
+        <Suspense fallback={<RouteLoadingScreen />}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/pulse" element={<Pulse />} />
+            <Route path="/friends" element={<Friends />} />
+            <Route path="/my-judges" element={<MyJudges />} />
+            <Route path="/history" element={<History />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/profile" element={<Profile />} />
+            <Route path="/help" element={<Help />} />
+            <Route path="/feedback" element={<FeedbackRouter />} />
+            <Route path="/admin-feedback" element={<Navigate to="/feedback" replace />} />
+            <Route path="/auth" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+        <BottomNav
+          fabTutorialSpotlight={fabSpotlight}
+          highlightTab={highlightNavTab}
+          tabTourBlocking={Boolean(highlightNavTab)}
+          onCreateGoal={() => {
+            if (fabSpotlight) onFabPhaseCreateOpened();
+            else setCreateOpen(true);
+          }}
+        />
+        {createOpen ? (
+          <Suspense fallback={<div className="fixed inset-0 z-50 bg-background/70 backdrop-blur-sm" />}>
+            <CreateGoalSheet open={createOpen} onClose={() => setCreateOpen(false)} />
+          </Suspense>
+        ) : null}
+      </div>
       <AppTutorialChrome onCloseCreateSheet={() => setCreateOpen(false)} />
       <FriendRequestToastHost />
       <JudgeRequestToastHost />
@@ -221,7 +281,6 @@ const App = () => {
         <TooltipProvider>
           <Toaster />
           <Sonner />
-          <AppVersionQuote />
           <Router>
             <AppRoutes />
           </Router>

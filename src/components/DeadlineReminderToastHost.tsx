@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
-import { TriangleAlert } from 'lucide-react';
+import { TriangleAlert, X } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -23,6 +23,7 @@ export function DeadlineReminderToastHost() {
   const seenRef = useRef<Set<string>>(new Set());
   const dismissedRef = useRef<Set<string>>(new Set());
   const temporaryHideRef = useRef<Set<string>>(new Set());
+  const suppressNextPaymentFailedOnDismissRef = useRef<Set<string>>(new Set());
 
   const dismissedStorageKey = userId ? `in_app_notification_dismissed:${userId}` : null;
 
@@ -39,6 +40,32 @@ export function DeadlineReminderToastHost() {
       // Ignore malformed or unavailable storage.
     }
   }, [dismissedStorageKey]);
+
+  useEffect(() => {
+    const onSuppress = (event: Event) => {
+      const customEvent = event as CustomEvent<{ toastId?: string; notificationId?: string | null }>;
+      const toastId =
+        customEvent.detail?.toastId ??
+        (customEvent.detail?.notificationId ? `payment_failed_${customEvent.detail.notificationId}` : null);
+      if (!toastId) return;
+      suppressNextPaymentFailedOnDismissRef.current.add(toastId);
+    };
+    window.addEventListener('suppress-payment-failed-toast-onDismiss', onSuppress as EventListener);
+    return () => window.removeEventListener('suppress-payment-failed-toast-onDismiss', onSuppress as EventListener);
+  }, []);
+
+  useEffect(() => {
+    const onPaymentFailedDismissed = (event: Event) => {
+      const customEvent = event as CustomEvent<{ notificationId?: string | null }>;
+      const notificationId = customEvent.detail?.notificationId ?? null;
+      if (!notificationId) return;
+      markDismissedLocally(notificationId);
+    };
+    window.addEventListener('payment-failed-dismissed', onPaymentFailedDismissed as EventListener);
+    return () => window.removeEventListener('payment-failed-dismissed', onPaymentFailedDismissed as EventListener);
+    // Intentionally no dependencies: `markDismissedLocally` is stable in practice for this component lifecycle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const markDismissedLocally = (notificationId: string) => {
     dismissedRef.current.add(notificationId);
@@ -150,29 +177,86 @@ export function DeadlineReminderToastHost() {
     const titleSuffixRaw = startsWithPrefix ? titleWithGoal.slice(titlePrefix.length) : titleWithGoal;
     const titleSuffix = titleSuffixRaw.replace(/\bfor an uncompleted goal\b/i, 'for uncompleted goal');
 
-    toast.error(
-      startsWithPrefix ? (
-        <span>
-          <span className="font-extrabold text-warning">{titlePrefix}</span>
-          <br />
-          <span>{titleSuffix}</span>
-        </span>
-      ) : (
-        <span className="font-extrabold text-warning">{titleWithGoal}</span>
-      ),
-      {
-      id: `payment_failed_${row.id}`,
+    const sonnerToastId = `payment_failed_${row.id}`;
+
+    const toastTitleNode = startsWithPrefix ? (
+      <span>
+        <span className="font-extrabold text-warning">{titlePrefix}</span>
+        <br />
+        <span>{titleSuffix}</span>
+      </span>
+    ) : (
+      <span className="font-extrabold text-warning">{titleWithGoal}</span>
+    );
+
+    const toastContent = (
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1 text-left">{toastTitleNode}</div>
+        <button
+          type="button"
+          aria-label="Dismiss notification"
+          className="order-last shrink-0 self-start !h-8 !w-8 !rounded-lg !border-0 !bg-transparent !shadow-none p-1.5 text-muted-foreground transition-colors hover:!bg-muted hover:!text-foreground [&>svg]:!h-5 [&>svg]:!w-5"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.dispatchEvent(
+              new CustomEvent('confirm-dismiss-payment-failed', {
+                detail: {
+                  notificationId: row.id,
+                  goalId: row.goalId ?? null,
+                  kind: row.kind ?? null,
+                  title: titleWithGoal,
+                },
+              }),
+            );
+          }}
+        >
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+    );
+
+    const onDismiss = () => {
+      // When user presses "Fix card", we temporarily hide the toast while the modal is open.
+      // That should not count as an actual dismiss/read.
+      if (temporaryHideRef.current.has(row.id)) {
+        temporaryHideRef.current.delete(row.id);
+        return;
+      }
+
+      // If the Retry modal confirmed dismiss, we already removed the toast and should not
+      // open the confirmation again (or re-create it).
+      if (suppressNextPaymentFailedOnDismissRef.current.has(sonnerToastId)) {
+        suppressNextPaymentFailedOnDismissRef.current.delete(sonnerToastId);
+        return;
+      }
+
+      // User clicked the toast close (X). Keep the toast visible until they confirm in the modal.
+      window.dispatchEvent(
+        new CustomEvent('confirm-dismiss-payment-failed', {
+          detail: {
+            notificationId: row.id,
+            goalId: row.goalId ?? null,
+            kind: row.kind ?? null,
+            title: titleWithGoal,
+          },
+        }),
+      );
+    };
+
+    toast.error(toastContent, {
+      id: sonnerToastId,
       description: undefined,
       icon: <TriangleAlert className="w-5 h-5 text-warning shrink-0 mt-0.5" aria-hidden />,
       duration: Number.POSITIVE_INFINITY,
-      closeButton: true,
-      closeButtonAriaLabel: 'Dismiss message',
+      closeButton: false,
+      dismissible: false,
       action: isOwner
         ? {
             label: 'Fix card',
             onClick: () => {
               temporaryHideRef.current.add(row.id);
-              toast.dismiss(`payment_failed_${row.id}`);
+              toast.dismiss(sonnerToastId);
               const payload = {
                 notificationId: row.id,
                 goalId: row.goalId ?? null,
@@ -187,24 +271,7 @@ export function DeadlineReminderToastHost() {
             },
           }
         : undefined,
-      onDismiss: () => {
-        // When user presses "Fix card", we temporarily hide the toast while the modal is open.
-        // That should not count as an actual dismiss/read.
-        if (temporaryHideRef.current.has(row.id)) {
-          temporaryHideRef.current.delete(row.id);
-          return;
-        }
-        window.dispatchEvent(
-          new CustomEvent('confirm-dismiss-payment-failed', {
-            detail: {
-              notificationId: row.id,
-              goalId: row.goalId ?? null,
-              kind: row.kind ?? null,
-              title: titleWithGoal,
-            },
-          }),
-        );
-      },
+      onDismiss,
     });
   };
 

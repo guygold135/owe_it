@@ -5,15 +5,14 @@ import { APP_TUTORIAL_SHEET_STEP_TO_PHASE, isAppTutorialSheetPhase } from '@/lib
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar, Heart, UserPlus } from 'lucide-react';
-import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import type { Dropin } from 'braintree-web-drop-in-react';
 import { useGoals } from '@/hooks/useGoals';
 import { useAuth } from '@/hooks/useAuth';
 import { Goal, Judge, Friend } from '@/lib/types';
 import { supabase } from '@/integrations/supabase/client';
-import { stripePromise } from '@/lib/stripe';
 import { toast } from 'sonner';
-import { formatStakeAmount, USD_TO_CURRENCY_RATE } from '@/lib/currency';
-import { stakeMajorToStripeUnits, isStripeZeroDecimalCurrency } from '@/lib/stripeCurrency';
+import { formatStakeAmount } from '@/lib/currency';
+import { stakeMajorToStripeUnits } from '@/lib/stripeCurrency';
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
 import { useMinimumStakeMajor } from '@/hooks/useMinimumStakeMajor';
 import { useShortDeadlineTesting } from '@/hooks/useShortDeadlineTesting';
@@ -37,174 +36,21 @@ import {
   readProfileAvatarFromStorage,
   writeProfileAvatarToStorage,
 } from '@/lib/profileAvatarEvents';
-
-const steps = ['goal', 'stake', 'judge', 'card', 'confirm'] as const;
-
-const USD_BASE_PRESET_STAKES = [0, 10, 25, 50, 75, 100, 150, 200] as const;
-/** Minimum time between "now" and deadline (must be strictly after this window). */
-const MIN_DEADLINE_LEAD_MS = 24 * 60 * 60 * 1000;
-
-function toDatetimeLocalString(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function getDeadlineValidationError(
-  deadlineDate: Date | null,
-  hasValue: boolean,
-  allowShortDeadlines: boolean,
-  now = Date.now(),
-): string | null {
-  if (!hasValue) return null;
-  if (!deadlineDate || Number.isNaN(deadlineDate.getTime())) return 'Please set a valid deadline.';
-  if (deadlineDate.getTime() <= now) return 'Choose a deadline in the future.';
-  if (!allowShortDeadlines && deadlineDate.getTime() <= now + MIN_DEADLINE_LEAD_MS) {
-    return 'Deadline must be more than 1 day from now.';
-  }
-  return null;
-}
-
-/** Large dot prefix for each requirement line (textarea). */
-const REQUIREMENT_BULLET = '●';
-
-function normalizeRequirementLines(text: string): string {
-  return text
-    .split('\n')
-    .map((line) => {
-      const trimmedStart = line.trimStart();
-      if (trimmedStart === '') return '';
-      if (/^[•·●\-*]\s?/.test(trimmedStart)) return line.trimEnd();
-      const lead = line.match(/^\s*/)?.[0] ?? '';
-      return `${lead}${REQUIREMENT_BULLET} ${trimmedStart.trimEnd()}`;
-    })
-    .join('\n')
-    .replace(/\n+$/, '');
-}
-
-function isRequirementsContentEmpty(text: string): boolean {
-  if (!text.trim()) return true;
-  return text.split('\n').every((line) => line.replace(/^[•·●\-*]\s*/, '').trim() === '');
-}
+import {
+  buildPresetStakesForCurrency,
+  formatStakePresetAmount,
+  getDeadlineValidationError,
+  isRequirementsContentEmpty,
+  MIN_DEADLINE_LEAD_MS,
+  normalizeRequirementLines,
+  REQUIREMENT_BULLET,
+  roundStakeMajor,
+  steps,
+  toDatetimeLocalString,
+} from '@/components/create-goal-sheet/helpers';
+import { CardStepContinueButton, CardStepFields } from '@/components/create-goal-sheet/CardStep';
 
 type CloseConfirmKind = 'judge-wait' | 'card' | 'sign' | 'tutorial-exit';
-
-const CARD_ELEMENT_OPTIONS = {
-  style: {
-    base: {
-      fontSize: '16px',
-      color: '#e2e8f0',
-      '::placeholder': { color: '#94a3b8' },
-    },
-    invalid: {
-      color: '#f87171',
-    },
-  },
-};
-
-function formatStakePresetAmount(amount: number, currency: string): string {
-  return new Intl.NumberFormat(undefined, {
-    style: 'currency',
-    currency: currency.toUpperCase(),
-    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
-
-function getPowerOfTenPresetMultiplier(rate: number): number {
-  if (!Number.isFinite(rate) || rate <= 0) return 1;
-  // Choose nearest by linear distance to 1x / 10x / 100x / 1000x ...
-  // Example: rate 3.7 is closer to 1 than 10 => keep base presets.
-  const candidates = [1, 10, 100, 1000, 10000];
-  let best = 1;
-  let bestDiff = Math.abs(rate - 1);
-  for (const c of candidates) {
-    const diff = Math.abs(rate - c);
-    if (diff < bestDiff) {
-      best = c;
-      bestDiff = diff;
-    }
-  }
-  return best;
-}
-
-function buildPresetStakesForCurrency(currency: string): number[] {
-  const rate = USD_TO_CURRENCY_RATE[currency as keyof typeof USD_TO_CURRENCY_RATE] ?? 1;
-  const multiplier = getPowerOfTenPresetMultiplier(rate);
-  return USD_BASE_PRESET_STAKES.map((usdAmount) => {
-    const raw = usdAmount * multiplier;
-    return isStripeZeroDecimalCurrency(currency) ? Math.round(raw) : raw;
-  });
-}
-
-function roundStakeMajor(num: number, currency: string): number {
-  if (isStripeZeroDecimalCurrency(currency)) return Math.round(num);
-  return Math.round(num * 100) / 100;
-}
-
-function CardStepFields({ stake, stakeCurrency }: { stake: number; stakeCurrency: string }) {
-  return (
-    <div className="space-y-6 flex-1">
-      <p className="text-sm text-muted-foreground">
-        <span className="font-semibold text-foreground">
-          Only your card will be charged {formatStakeAmount(stake, stakeCurrency)},
-        </span>{' '}
-        if you don&apos;t complete your goal by the deadline.
-      </p>
-
-      <div className="p-4 bg-muted rounded-2xl">
-        <CardElement options={CARD_ELEMENT_OPTIONS} />
-      </div>
-    </div>
-  );
-}
-
-function CardStepContinueButton({ onPaymentMethodReady }: { onPaymentMethodReady: (pmId: string) => void }) {
-  const stripe = useStripe();
-  const elements = useElements();
-
-  const handleContinue = async () => {
-    if (!stripe || !elements) {
-      toast.error('Payment system is still loading. Please wait a moment and try again.');
-      return;
-    }
-    const cardEl = elements.getElement(CardElement);
-    if (!cardEl) {
-      toast.error('Please enter your card details.');
-      return;
-    }
-
-    try {
-      const { error, paymentMethod } = await stripe.createPaymentMethod({
-        type: 'card',
-        card: cardEl,
-      });
-
-      if (error) {
-        toast.error(error.message ?? 'Could not add card.');
-        return;
-      }
-      if (!paymentMethod?.id) {
-        toast.error('Something went wrong saving your card. Please try again.');
-        return;
-      }
-      onPaymentMethodReady(paymentMethod.id);
-    } catch (err: any) {
-      console.error('Stripe error', err);
-      toast.error(err?.message ?? 'Something went wrong saving your card.');
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={handleContinue}
-      disabled={!stripe || !elements}
-      className="flex-1 py-4 rounded-2xl bg-primary text-primary-foreground font-display font-bold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-    >
-      Continue <ChevronRight className="w-4 h-4" />
-    </button>
-  );
-}
 
 async function getFunctionInvokeErrorMessage(error: unknown, fallback: string): Promise<string> {
   if (error && typeof error === 'object') {
@@ -323,7 +169,10 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const [deadline, setDeadline] = useState('');
   const [judge, setJudge] = useState<Judge | null>(null);
   const [isPrivate, setIsPrivate] = useState(false);
-  const [paymentMethodId, setPaymentMethodId] = useState<string | null>(null);
+  const [braintreePaymentMethodToken, setBraintreePaymentMethodToken] = useState<string | null>(null);
+  const [braintreeCustomerId, setBraintreeCustomerId] = useState<string | null>(null);
+  const [braintreeDropinInstance, setBraintreeDropinInstance] = useState<Dropin | null>(null);
+  const [cardStepSubmitting, setCardStepSubmitting] = useState(false);
   const [customStakeError, setCustomStakeError] = useState(false);
   const [customStakeInput, setCustomStakeInput] = useState('');
   const [selectedCharityId, setSelectedCharityId] = useState(DEFAULT_CHARITY_ID);
@@ -733,7 +582,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const reset = () => {
     setStep(0); setTitle(''); setDescription(''); setStake(0);
     setDeadline(''); setJudge(null); setIsPrivate(false);
-    setPaymentMethodId(null); setCustomStakeInput(''); setCustomStakeError(false);
+    setBraintreePaymentMethodToken(null); setBraintreeCustomerId(null); setBraintreeDropinInstance(null);
+    setCardStepSubmitting(false);
+    setCustomStakeInput(''); setCustomStakeError(false);
     setSelectedCharityId(DEFAULT_CHARITY_ID);
     setJudgeRequestId(null); setWaitingJudgeName(null);
     setConfirmCloseKind(null);
@@ -1024,13 +875,14 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       return;
     }
 
-    if (!paymentMethodId || !user?.id) {
+    if (!braintreePaymentMethodToken || !user?.id) {
       toast.error('Payment method or user missing.');
       throw new Error('Payment method or user missing.');
     }
 
     const requestBody = {
-      paymentMethodId,
+      braintreePaymentMethodToken,
+      braintreeCustomerId,
       userId: user.id,
       goalTitle: title,
       description,
@@ -1499,8 +1351,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       <p>
                         Only if the stake is charged, the combined payment processing and app fee is{' '}
                         <span className="text-foreground/90">6.7% + US$0.50</span>. The rest is transferred to the charity
-                        you selected. Non-USD stakes settle in EUR; the US dollar fixed fee is approximate at other
-                        currencies.
+                        you selected.
                       </p>
                       <p>
                         If your card is billed in another currency, your bank may charge a separate conversion fee we do
@@ -1712,27 +1563,41 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                   </div>
                 </div>
               )}
-              {step === 3 && !tutorialCreateFlowActive && stripePromise && (
-                <Elements stripe={stripePromise}>
-                  <div className="flex flex-col flex-1 min-h-0">
-                    <CardStepFields stake={stake} stakeCurrency={stakeCurrency} />
-                    <div className="flex gap-3 mt-8">
-                      <button
-                        type="button"
-                        onClick={goBack}
-                        className="flex-1 py-4 rounded-2xl bg-muted text-muted-foreground font-display font-semibold"
-                      >
-                        Back
-                      </button>
-                      <CardStepContinueButton
-                        onPaymentMethodReady={(id) => {
-                          setPaymentMethodId(id);
-                          setStep(4);
-                        }}
-                      />
+              {step === 3 && !tutorialCreateFlowActive && (
+                <div className="relative flex flex-col flex-1 min-h-0">
+                  {cardStepSubmitting && (
+                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-2xl bg-background px-6">
+                      <div className="h-7 w-7 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+                      <p className="text-sm text-muted-foreground">Loading secure card form…</p>
                     </div>
-                  </div>
-                </Elements>
+                  )}
+                  <CardStepFields
+                    stake={stake}
+                    stakeCurrency={stakeCurrency}
+                    onDropinReady={setBraintreeDropinInstance}
+                    hideContent={cardStepSubmitting}
+                  />
+                  {!cardStepSubmitting && (
+                    <div className="flex gap-3 mt-8">
+                    <button
+                      type="button"
+                      onClick={goBack}
+                      className="flex-1 py-4 rounded-2xl bg-muted text-muted-foreground font-display font-semibold"
+                    >
+                      Back
+                    </button>
+                    <CardStepContinueButton
+                      dropinInstance={braintreeDropinInstance}
+                      onSubmittingChange={setCardStepSubmitting}
+                      onPaymentMethodReady={({ token, customerId }) => {
+                        setBraintreePaymentMethodToken(token);
+                        setBraintreeCustomerId(customerId);
+                        setStep(4);
+                      }}
+                    />
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Step 4: Confirm */}
@@ -1740,7 +1605,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                 <div className="relative flex min-h-0 flex-1 flex-col">
                   {signOverlayPhase !== 'idle' && (
                     <div
-                      className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 rounded-2xl bg-background/90 px-6 backdrop-blur-md"
+                      className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 rounded-2xl bg-background px-6"
                       aria-live="polite"
                     >
                       <SuccessMorphIcon
@@ -1784,6 +1649,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     </div>
                   </div>
 
+                  <p className="pt-4 text-center text-xs font-medium uppercase tracking-widest text-muted-foreground/80">
+                    HOLD TO ACCEPT
+                  </p>
                   <div className="mt-auto flex shrink-0 gap-3 pt-6">
                     <button
                       type="button"

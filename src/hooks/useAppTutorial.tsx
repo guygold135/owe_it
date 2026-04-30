@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -20,6 +20,8 @@ export type { AppTutorialPhase };
 
 type AppTutorialContextValue = {
   phase: AppTutorialPhase;
+  /** While deciding whether first-run tutorial should open, block underlying UI. */
+  tutorialBootBlocking: boolean;
   /** True while the user should see the tour (not completed and not skipped). */
   tutorialActive: boolean;
   /** Blur nav links; only FAB is interactive. */
@@ -66,12 +68,21 @@ export function AppTutorialProvider({
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [phase, setPhase] = useState<AppTutorialPhase>('off');
   const [loadingFlag, setLoadingFlag] = useState(true);
   const [createHadPaidStake, setCreateHadPaidStake] = useState<boolean | null>(null);
   const [tutorialCreatedGoalId, setTutorialCreatedGoalId] = useState<string | null>(null);
 
   useEffect(() => {
+    // Do not show onboarding tutorial chrome while user is on the auth/sign-up screen.
+    // This prevents the "Step 1 of 12..." dialog from appearing during signup.
+    if (location.pathname === '/auth') {
+      setPhase('off');
+      setLoadingFlag(false);
+      return;
+    }
+
     if (!user?.id) {
       setPhase('off');
       setLoadingFlag(false);
@@ -116,7 +127,9 @@ export function AppTutorialProvider({
           if (done != null) {
             setPhase('off');
           } else {
-            setPhase('welcome');
+            // Only show the tutorial if the backend/user metadata explicitly opted-in.
+            // This prevents onboarding chrome from appearing right after sign-up.
+            setPhase(metaNeedsTutorial ? 'welcome' : 'off');
           }
           setLoadingFlag(false);
           return;
@@ -149,7 +162,7 @@ export function AppTutorialProvider({
     return () => {
       alive = false;
     };
-  }, [user?.id, user?.needsAppTutorial]);
+  }, [user?.id, user?.needsAppTutorial, location.pathname]);
 
   const persistDone = useCallback(async () => {
     if (!user?.id) return;
@@ -171,8 +184,10 @@ export function AppTutorialProvider({
   }, [persistDone]);
 
   const onWelcomeContinue = useCallback(() => {
-    setPhase('fab');
-  }, []);
+    void persistDone();
+    setPhase('off');
+    setCreateHadPaidStake(null);
+  }, [persistDone]);
 
   const goBackToWelcomeFromFab = useCallback(() => {
     setPhase('welcome');
@@ -280,6 +295,7 @@ export function AppTutorialProvider({
     }
   }, [phase, createGoalOpen]);
 
+  const tutorialBootBlocking = loadingFlag && Boolean(user?.id) && location.pathname !== '/auth';
   const tutorialActive = phase !== 'off' && !loadingFlag;
   const fabSpotlight = phase === 'fab';
   const sheetCloseLocked = isAppTutorialSheetPhase(phase) && createGoalOpen;
@@ -321,6 +337,7 @@ export function AppTutorialProvider({
   const value = useMemo(
     (): AppTutorialContextValue => ({
       phase,
+      tutorialBootBlocking,
       tutorialActive,
       fabSpotlight,
       sheetCloseLocked,
@@ -343,6 +360,7 @@ export function AppTutorialProvider({
     }),
     [
       phase,
+      tutorialBootBlocking,
       tutorialActive,
       fabSpotlight,
       sheetCloseLocked,

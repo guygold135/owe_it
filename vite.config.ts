@@ -48,6 +48,8 @@ export default defineConfig(({ mode }) => ({
   build: {
     // Keep the default, but make it explicit for Capacitor's `webDir`.
     outDir: "dist",
+    // Warn only for unexpectedly huge bundles; this avoids noisy warnings in CI.
+    chunkSizeWarningLimit: 1500,
   },
   resolve: {
     alias: {

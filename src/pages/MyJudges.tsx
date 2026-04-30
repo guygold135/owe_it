@@ -1,14 +1,19 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { useQueryClient } from '@tanstack/react-query';
 import UserProfilePopover from '@/components/UserProfilePopover';
 import { useGoalsAsJudge } from '@/hooks/useGoalsAsJudge';
+import { useAuth } from '@/hooks/useAuth';
 import { useDeadlineReminderTriggers } from '@/hooks/useDeadlineReminderTriggers';
 import { useDeadlineLocalToasts } from '@/hooks/useDeadlineLocalToasts';
 import { useAutoExpireGoals } from '@/hooks/useAutoExpireGoals';
 import { JudgeGoalCard } from '@/components/JudgeGoalCard';
 import { GoalsListSkeleton } from '@/components/PageSkeletons';
+import { queryKeys } from '@/lib/queryKeys';
 
 export default function MyJudges() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
   const { goals, loading, loadGoals } = useGoalsAsJudge();
   useAutoExpireGoals(goals, loadGoals, { enabled: true, loading });
 
@@ -28,19 +33,24 @@ export default function MyJudges() {
   );
   useDeadlineLocalToasts(deadlineLocalToastGoals);
 
+  const handleGoalResolved = useCallback(async () => {
+    await loadGoals();
+    if (!user?.id) return;
+    void queryClient.invalidateQueries({ queryKey: queryKeys.goals(user.id) });
+  }, [loadGoals, queryClient, user?.id]);
+
   return (
     <div className="min-h-screen bg-background pb-28">
       <div className="flex items-start justify-between gap-4 px-6 pb-6 pt-12">
-        <div>
+        <div className="min-w-0 flex-1">
           <motion.h1
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="mt-2 pr-2 text-xl font-display font-extrabold leading-snug tracking-tight text-balance text-foreground"
+            className="mt-2 pr-4 text-base sm:text-xl font-display font-extrabold leading-snug tracking-tight text-balance text-foreground"
           >
-            Honest judgment builds real change.
-            <br />
-            Be the judge they can trust.
+            <span className="block whitespace-nowrap">Honest judgment builds real change.</span>
+            <span className="block whitespace-nowrap">Be the judge they can trust.</span>
           </motion.h1>
         </div>
         <UserProfilePopover />
@@ -59,7 +69,7 @@ export default function MyJudges() {
               </p>
             </div>
           ) : (
-            activeGoals.map((goal) => <JudgeGoalCard key={goal.id} goal={goal} onResolved={loadGoals} />)
+            activeGoals.map((goal) => <JudgeGoalCard key={goal.id} goal={goal} onResolved={handleGoalResolved} />)
           )}
         </div>
       </div>

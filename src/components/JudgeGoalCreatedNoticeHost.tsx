@@ -106,7 +106,7 @@ export function JudgeGoalCreatedNoticeHost() {
 
   return (
     <div
-      className="pointer-events-none fixed bottom-20 right-4 z-[101] flex w-[min(100vw-2rem,22rem)] max-h-[min(40vh,calc(100vh-8rem))] flex-col gap-2 overflow-y-auto overscroll-contain pb-1"
+      className="pointer-events-none fixed bottom-20 right-4 z-[90] flex w-[min(100vw-2rem,22rem)] max-h-[min(40vh,calc(100vh-8rem))] flex-col gap-2 overflow-y-auto overscroll-contain pb-1"
       aria-live="polite"
     >
       {notices.map((n) => (

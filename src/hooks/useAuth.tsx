@@ -278,7 +278,7 @@ function useProvideAuth(): AuthContextValue {
       email,
       password,
       options: {
-        data: { display_name: trimmedName, needs_app_tutorial: true },
+        data: { display_name: trimmedName },
         emailRedirectTo: authEmailRedirectTo(),
       },
     });

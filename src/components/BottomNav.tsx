@@ -40,6 +40,7 @@ export function BottomNav({
       style={{ bottom: 'env(safe-area-inset-bottom)' }}
     >
       <div
+        data-bottom-nav-inner="true"
         className={cn(
           'flex items-center px-2 py-3 max-w-lg mx-auto gap-1',
           tabTourBlocking && 'pointer-events-none',
@@ -79,6 +80,7 @@ export function BottomNav({
         <button
           type="button"
           onClick={onCreateGoal}
+          data-create-goal-fab="true"
           className={cn(
             'relative z-[4] shrink-0 w-12 h-12 rounded-2xl bg-primary flex items-center justify-center glow-primary',
             fabTutorialSpotlight && 'shadow-lg shadow-primary/30',

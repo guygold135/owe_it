@@ -2,7 +2,6 @@ import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useGoals } from '@/hooks/useGoals';
 import {
-  ArrowLeft,
   Calendar,
   Check,
   Eye,
@@ -13,7 +12,6 @@ import {
   AlertTriangle,
   DollarSign,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import UserProfilePopover from '@/components/UserProfilePopover';
 import { GoalsListSkeleton } from '@/components/PageSkeletons';
 import { formatStakeAmount } from '@/lib/currency';
@@ -44,7 +42,6 @@ function JudgeGavelIcon({ className }: { className?: string }) {
 }
 
 export default function History() {
-  const navigate = useNavigate();
   const { goals, loading } = useGoals();
 
   const pastGoals = useMemo(() => {
@@ -77,14 +74,6 @@ export default function History() {
           >
             Past goals
           </motion.h1>
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            className="mt-4 inline-flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            Back
-          </button>
         </div>
         <UserProfilePopover />
       </div>

@@ -12,7 +12,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { Copy, History, MessageSquare, Settings, User } from "lucide-react";
+import { CircleHelp, Copy, History, MessageSquare, Settings, User } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { PopoverClose } from "@/components/ui/popover";
@@ -257,6 +257,17 @@ export default function UserProfilePopover() {
             >
               <MessageSquare className="mr-2 h-4 w-4" />
               Feedback
+            </Button>
+          </PopoverClose>
+          <PopoverClose asChild>
+            <Button
+              variant="ghost"
+              className="w-full justify-start"
+              size="sm"
+              onClick={() => navigate("/help")}
+            >
+              <CircleHelp className="mr-2 h-4 w-4" />
+              Support
             </Button>
           </PopoverClose>
           <PopoverClose asChild>

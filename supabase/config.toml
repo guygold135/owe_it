@@ -32,3 +32,9 @@ verify_jwt = false
 
 [functions.debug-trigger-payment-failed-alert]
 verify_jwt = false
+
+[functions.create-braintree-client-token]
+verify_jwt = false
+
+[functions.vault-braintree-payment-method]
+verify_jwt = false

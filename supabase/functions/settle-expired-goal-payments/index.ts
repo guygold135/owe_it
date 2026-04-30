@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createFailedStakePaymentIntent } from "../_shared/failed-stake-intent.ts";
 import { buildCorsHeaders } from "../_shared/cors.ts";
+import { chargeFailedGoalWithVaultToken, isBraintreeConfigured } from "../_shared/braintree.ts";
 
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -17,15 +18,17 @@ function jsonResponse(body: unknown, corsHeaders: Record<string, string>, status
 }
 
 async function settleFailedPayment(
-  stripe: Stripe,
+  stripe: Stripe | null,
   supabase: ReturnType<typeof createClient>,
   goal: {
     id: string;
     stake: number | null;
     stake_currency?: string | null;
+    payment_provider?: string | null;
     payment_intent_id?: string | null;
     payment_method_id?: string | null;
     stripe_customer_id?: string | null;
+    braintree_payment_method_token?: string | null;
     payment_retry_count?: number | null;
     charity_id?: string | null;
   },
@@ -33,8 +36,51 @@ async function settleFailedPayment(
   const stake = Number(goal.stake ?? 0);
   if (stake <= 0) return "skipped";
 
+  const paymentProvider = (goal.payment_provider ?? "").toLowerCase();
+  const braintreeToken = goal.braintree_payment_method_token ?? null;
+  if ((paymentProvider === "braintree" || braintreeToken) && isBraintreeConfigured()) {
+    if (!braintreeToken) return "skipped";
+    try {
+      const bt = await chargeFailedGoalWithVaultToken({
+        goalId: goal.id,
+        amountMajor: stake,
+        currencyIso: goal.stake_currency ?? "usd",
+        paymentMethodToken: braintreeToken,
+      });
+      const { error } = await supabase
+        .from("goals")
+        .update({
+          payment_provider: "braintree",
+          braintree_transaction_id: bt.transactionId,
+          braintree_transaction_status: bt.status,
+          payment_status: "captured",
+          payment_retry_count: 0,
+          next_payment_retry_at: null,
+          last_payment_error: null,
+        })
+        .eq("id", goal.id);
+      if (error) throw new Error(`Could not persist Braintree capture: ${error.message}`);
+      return "captured";
+    } catch (btErr) {
+      const retries = Number(goal.payment_retry_count ?? 0) + 1;
+      const nextRetryAt = new Date(Date.now() + Math.min(24, 2 ** retries) * 60 * 60 * 1000).toISOString();
+      await supabase
+        .from("goals")
+        .update({
+          payment_provider: "braintree",
+          payment_status: "payment_failed",
+          payment_retry_count: retries,
+          next_payment_retry_at: nextRetryAt,
+          last_payment_error: btErr instanceof Error ? btErr.message : String(btErr),
+        })
+        .eq("id", goal.id);
+      return "failed_needs_action";
+    }
+  }
+
   const piId = goal.payment_intent_id ?? null;
   if (piId) {
+    if (!stripe) throw new Error("Stripe is not configured");
     const pi = await stripe.paymentIntents.retrieve(piId);
     const initialStatus = pi.status;
     if (pi.status === "requires_capture") {
@@ -69,6 +115,7 @@ async function settleFailedPayment(
   if (!paymentMethodId || !customerId) {
     return "skipped";
   }
+  if (!stripe) throw new Error("Stripe is not configured");
 
   const deferredPi = await createFailedStakePaymentIntent(stripe, goal, {
     customerId,
@@ -126,7 +173,7 @@ serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    if (!stripeSecret || !supabaseUrl || !supabaseServiceKey) {
+    if ((!stripeSecret && !isBraintreeConfigured()) || !supabaseUrl || !supabaseServiceKey) {
       return jsonResponse({ error: "Server configuration missing" }, corsHeaders, 500);
     }
     if (!cronSecret) {
@@ -143,9 +190,11 @@ serve(async (req: Request): Promise<Response> => {
       return jsonResponse({ error: "Unauthorized" }, corsHeaders, 401);
     }
 
-    const stripe = new Stripe(stripeSecret, {
-      apiVersion: "2024-06-20",
-    });
+    const stripe = stripeSecret
+      ? new Stripe(stripeSecret, {
+          apiVersion: "2024-06-20",
+        })
+      : null;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     const runStartedAt = new Date().toISOString();
 
@@ -189,7 +238,7 @@ serve(async (req: Request): Promise<Response> => {
 
     const { data: goals, error: queryError } = await supabase
       .from("goals")
-      .select("id,user_id,judge_user_id,title,payment_intent_id,payment_method_id,stripe_customer_id,payment_status,stake,stake_currency,charity_id,payment_retry_count,next_payment_retry_at")
+      .select("id,user_id,judge_user_id,title,payment_provider,payment_intent_id,payment_method_id,stripe_customer_id,braintree_payment_method_token,payment_status,stake,stake_currency,charity_id,payment_retry_count,next_payment_retry_at")
       .eq("status", "failed")
       .in("payment_status", ["authorized", "stored_for_later_capture", "payment_failed"])
       .or(`next_payment_retry_at.is.null,next_payment_retry_at.lte.${new Date().toISOString()}`)

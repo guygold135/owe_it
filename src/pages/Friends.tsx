@@ -292,7 +292,7 @@ export default function Friends() {
   return (
     <div className="min-h-screen bg-background pb-28">
       <div className="px-6 pt-12 pb-6 flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0 flex-1">
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -304,10 +304,10 @@ export default function Friends() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="mt-2 pr-2 text-xl font-display font-extrabold leading-snug tracking-tight text-balance text-foreground"
+            className="mt-2 pr-4 text-base sm:text-xl font-display font-extrabold leading-snug tracking-tight text-balance text-foreground"
           >
-            <span className="block">Progress grows better with people.</span>
-            <span className="block">Choose your circle wisely.</span>
+            <span className="block whitespace-nowrap">Progress grows better with people.</span>
+            <span className="block whitespace-nowrap">Choose your circle wisely.</span>
           </motion.h1>
         </div>
         <UserProfilePopover />
@@ -515,7 +515,7 @@ export default function Friends() {
             <div className="min-w-0">
               <h4 className="font-display font-semibold text-foreground">Invite by link</h4>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Send a signup link so your friends can create an Owe It account.
+                Send a signup link so your friends can create an Owe It account and join you.
               </p>
             </div>
             <button

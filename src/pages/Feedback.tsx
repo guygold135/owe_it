@@ -73,7 +73,7 @@ export default function Feedback() {
             Feedback
           </motion.h1>
           <p className="text-sm text-muted-foreground mt-2">
-            Tell us what is working well and what we should improve.
+            Tell us what is working well and what we should improve. we love an honest advice.
           </p>
         </div>
         <UserProfilePopover />

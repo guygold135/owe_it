@@ -149,7 +149,7 @@ export function JudgeRequestToastHost() {
     <div
       ref={stackRef}
       className={cn(
-        'pointer-events-none fixed bottom-20 right-4 z-[100] flex max-h-[min(70vh,calc(100vh-8rem))] w-[min(100vw-2rem,22rem)] flex-col gap-2 overflow-y-auto overscroll-contain pb-1',
+        'pointer-events-none fixed bottom-20 right-4 z-[90] flex max-h-[min(70vh,calc(100vh-8rem))] w-[min(100vw-2rem,22rem)] flex-col gap-2 overflow-y-auto overscroll-contain pb-1',
         judgeRequests.length === 0 && 'hidden',
       )}
       aria-live="polite"

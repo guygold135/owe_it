@@ -9,6 +9,7 @@ import {
 } from "../_shared/stripe-money.ts";
 import { DEFAULT_CHARITY_ID, isValidCharityId } from "../_shared/charities.ts";
 import { buildCorsHeaders } from "../_shared/cors.ts";
+import { isBraintreeConfigured } from "../_shared/braintree.ts";
 
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -78,6 +79,112 @@ serve(async (req: Request): Promise<Response> => {
     }
 
     const body = await req.json();
+
+    // Braintree flow: token is vaulted first, then attached to goal for delayed charge.
+    if (body.braintreePaymentMethodToken) {
+      const authUserId = await getAuthenticatedUserId(req);
+      if (!authUserId) {
+        return jsonResponse({ error: "Unauthorized" }, corsHeaders, 401);
+      }
+      if (!isBraintreeConfigured()) {
+        return jsonResponse({ error: "Braintree is not configured" }, corsHeaders, 500);
+      }
+      if (!supabaseUrl || !supabaseServiceKey) {
+        return jsonResponse(
+          { error: "Server missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" },
+          corsHeaders,
+          500,
+        );
+      }
+
+      const {
+        braintreePaymentMethodToken,
+        braintreeCustomerId,
+        userId,
+        goalTitle,
+        description,
+        deadline,
+        judgeName,
+        judgeUserId,
+        isPrivate,
+        amount: amountRaw,
+        currency,
+        charityId: charityIdRaw,
+      } = body;
+
+      if (
+        typeof braintreePaymentMethodToken !== "string" ||
+        !braintreePaymentMethodToken ||
+        !userId ||
+        !goalTitle ||
+        typeof amountRaw !== "number" ||
+        !Number.isFinite(amountRaw) ||
+        amountRaw <= 0
+      ) {
+        return jsonResponse({ error: "Missing or invalid fields for Braintree flow" }, corsHeaders, 400);
+      }
+      if (userId !== authUserId) {
+        return jsonResponse({ error: "Forbidden" }, corsHeaders, 403);
+      }
+
+      const normalizedCurrency = normalizeStakeCurrencyShared(currency);
+      const charityId =
+        typeof charityIdRaw === "string" && isValidCharityId(charityIdRaw)
+          ? charityIdRaw
+          : DEFAULT_CHARITY_ID;
+
+      const stakeMajor = stripeUnitsToStakeMajor(Math.trunc(amountRaw), normalizedCurrency);
+      const minMajor = await resolveMinimumStakeMajor(normalizedCurrency);
+      if (stakeMajor > 0 && stakeMajor + 1e-9 < minMajor) {
+        return jsonResponse(
+          {
+            error:
+              `Minimum stake is ${minMajor} ${normalizedCurrency.toUpperCase()} (at least US$1).`,
+          },
+          corsHeaders,
+          400,
+        );
+      }
+
+      const expectedUnits = stakeMajorToStripeUnits(stakeMajor, normalizedCurrency);
+      if (Math.trunc(amountRaw) !== expectedUnits) {
+        return jsonResponse({ error: "Invalid stake amount for currency" }, corsHeaders, 400);
+      }
+
+      const supabase = createClient(supabaseUrl, supabaseServiceKey);
+      const { data: goal, error: insertError } = await supabase
+        .from("goals")
+        .insert({
+          user_id: userId,
+          title: goalTitle,
+          description: description ?? "",
+          stake: stakeMajor,
+          stake_currency: normalizedCurrency,
+          deadline,
+          status: "active",
+          judge_name: judgeName ?? null,
+          judge_user_id: judgeUserId ?? null,
+          is_private: !!isPrivate,
+          charity_id: charityId,
+          payment_provider: "braintree",
+          braintree_customer_id:
+            typeof braintreeCustomerId === "string" && braintreeCustomerId ? braintreeCustomerId : null,
+          braintree_payment_method_token: braintreePaymentMethodToken,
+          payment_status: "stored_for_later_capture",
+        })
+        .select("id")
+        .single();
+
+      if (insertError) {
+        return jsonResponse(
+          { error: errorMessage(insertError, "Goal could not be saved for Braintree flow") },
+          corsHeaders,
+          500,
+        );
+      }
+
+      return jsonResponse({ success: true, goalId: goal.id }, corsHeaders);
+    }
 
     // In-app flow: store payment method now, charge only on failed/expired outcome.
     if (body.paymentMethodId) {

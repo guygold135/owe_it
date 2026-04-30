@@ -174,7 +174,7 @@ export function StakeCard({
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <Palette className="h-3.5 w-3.5" />
+                      <Palette className="h-4 w-4 text-foreground/80" />
                     </button>
                   </PopoverTrigger>
                   <PopoverContent

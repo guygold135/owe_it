@@ -5,6 +5,10 @@ on:
     - cron: "25 * * * *"
   workflow_dispatch:
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -13,14 +17,53 @@ jobs:
         env:
           HEALTH_URL: https://lngepgvviuqanzlslqhf.supabase.co/functions/v1/settlement-health
           AUTO_EXPIRE_CRON_SECRET: ${{ secrets.AUTO_EXPIRE_CRON_SECRET }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -z "$AUTO_EXPIRE_CRON_SECRET" ]; then
             echo "Missing GitHub secret AUTO_EXPIRE_CRON_SECRET (same value as Supabase AUTO_EXPIRE_CRON_SECRET)"
             exit 1
           fi
 
-          curl --fail-with-body \
+          response_file="$(mktemp)"
+          http_code="$(curl --silent --show-error \
+            --output "$response_file" \
+            --write-out "%{http_code}" \
             -X POST "$HEALTH_URL" \
             -H "Content-Type: application/json" \
             -H "x-cron-secret: $AUTO_EXPIRE_CRON_SECRET" \
-            -d '{}'
+            -d '{}')"
+          body="$(cat "$response_file")"
+          rm -f "$response_file"
+
+          echo "Health endpoint status: $http_code"
+          echo "Health endpoint body: $body"
+
+          if [ "$http_code" = "200" ]; then
+            exit 0
+          fi
+
+          # If it is stale once, only fail when the previous completed run also failed.
+          if [ "$http_code" = "503" ] && echo "$body" | jq -e '.reason == "stale"' >/dev/null 2>&1; then
+            prev_conclusion="$(curl --silent --show-error \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/settlement-health.yml/runs?per_page=10" \
+              | jq -r '
+                  .workflow_runs
+                  | map(select((.id|tostring) != env.GITHUB_RUN_ID and .status == "completed"))
+                  | .[0].conclusion // "none"
+                ')"
+
+            echo "Previous completed run conclusion: $prev_conclusion"
+
+            if [ "$prev_conclusion" = "failure" ]; then
+              echo "Stale health check failed twice in a row."
+              exit 1
+            fi
+
+            echo "Single stale health check detected; tolerating once to avoid alert noise."
+            exit 0
+          fi
+
+          echo "Non-stale health check failure."
+          exit 1

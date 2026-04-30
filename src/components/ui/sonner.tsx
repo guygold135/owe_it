@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 import { Toaster as Sonner, toast } from "sonner";
+import { useRaiseNotificationsOverOpenWindows } from "@/lib/useRaiseNotificationsOverOpenWindows";
 
 type ToasterProps = ComponentProps<typeof Sonner>;
 
@@ -10,10 +11,13 @@ const BOTTOM_OFFSET = `calc(5rem + env(safe-area-inset-bottom, 0px) + var(--owei
 const HORIZONTAL_INSET = "1rem";
 
 const Toaster = ({ ...props }: ToasterProps) => {
+  const { zIndex } = useRaiseNotificationsOverOpenWindows("[data-sonner-toast]");
+
   return (
     <Sonner
       theme="system"
       className="toaster group"
+      style={{ zIndex }}
       position="bottom-right"
       /** Always expanded: vertical list with gap — no stacked/overlapping cards; newest stays lowest (Sonner default for bottom). */
       expand

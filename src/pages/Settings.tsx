@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Elements, CardElement, useElements, useStripe } from '@stripe/react-stripe-js';
-import type { StripeCardElementChangeEvent } from '@stripe/stripe-js';
+import DropIn, { type Dropin } from 'braintree-web-drop-in-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -21,23 +20,74 @@ import { AlertTriangle, LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 import { SUPPORTED_STAKE_CURRENCIES, formatStakeAmount, formatStakeCurrencyLabel, type StakeCurrency } from '@/lib/currency';
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
-import { useShortDeadlineTesting } from '@/hooks/useShortDeadlineTesting';
 import { useGoals } from '@/hooks/useGoals';
 import { useGoalsAsJudge } from '@/hooks/useGoalsAsJudge';
 import UserProfilePopover from '@/components/UserProfilePopover';
-import { stripePromise } from '@/lib/stripe';
 import { queryKeys } from '@/lib/queryKeys';
 
-const CARD_ELEMENT_OPTIONS = {
-  style: {
-    base: {
-      fontSize: '16px',
-      color: '#f4f4f5',
-      '::placeholder': { color: '#9ca3af' },
-    },
-    invalid: { color: '#f87171' },
-  },
-};
+function resolveTransactionCurrencies(): StakeCurrency[] {
+  const raw = (import.meta.env.VITE_ALLOWED_STAKE_CURRENCIES as string | undefined)?.trim();
+  if (!raw) return ['ils', 'usd'];
+  const parsed = raw
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter((value): value is StakeCurrency =>
+      SUPPORTED_STAKE_CURRENCIES.includes(value as StakeCurrency),
+    );
+  return parsed.length > 0 ? Array.from(new Set(parsed)) : ['ils', 'usd'];
+}
+
+async function getInvokeErrorMessage(error: unknown, fallback: string): Promise<string> {
+  if (error && typeof error === 'object') {
+    const maybeContext = (error as { context?: Response | { json?: () => Promise<unknown>; text?: () => Promise<string> } }).context;
+    if (maybeContext && typeof maybeContext === 'object' && 'json' in maybeContext && typeof maybeContext.json === 'function') {
+      try {
+        const payload = (await maybeContext.json()) as {
+          error?: unknown;
+          debug?: { provider?: unknown; environment?: unknown; currency?: unknown; merchantAccountId?: unknown };
+        };
+        if (typeof payload.error === 'string' && payload.error.trim()) {
+          const debug = payload.debug;
+          if (debug && typeof debug === 'object') {
+            const provider = typeof debug.provider === 'string' ? debug.provider : 'provider';
+            const environment = typeof debug.environment === 'string' ? debug.environment : 'unknown';
+            const currency = typeof debug.currency === 'string' ? debug.currency : 'unknown';
+            const merchantAccountId =
+              typeof debug.merchantAccountId === 'string' && debug.merchantAccountId.trim()
+                ? debug.merchantAccountId
+                : 'none';
+            return `${payload.error.trim()} (${provider} env=${environment} currency=${currency} merchant=${merchantAccountId})`;
+          }
+          return payload.error.trim();
+        }
+      } catch {
+        try {
+          if ('text' in maybeContext && typeof maybeContext.text === 'function') {
+            const text = await maybeContext.text();
+            if (text.trim()) return text.trim();
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+  }
+  return fallback;
+}
+
+async function getGoalLastPaymentError(goalId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('goals')
+    .select('last_payment_error')
+    .eq('id', goalId)
+    .maybeSingle();
+  if (error) return null;
+  const message = (data as { last_payment_error?: unknown } | null)?.last_payment_error;
+  if (typeof message === 'string' && message.trim()) return message.trim();
+  return null;
+}
 
 function RetryPaymentCardForm({
   goalId,
@@ -46,33 +96,67 @@ function RetryPaymentCardForm({
   goalId: string;
   onSuccess: () => void;
 }) {
-  const stripe = useStripe();
-  const elements = useElements();
+  const [clientToken, setClientToken] = useState<string | null>(null);
+  const [loadingToken, setLoadingToken] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [dropinInstance, setDropinInstance] = useState<Dropin | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [cardComplete, setCardComplete] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingToken(true);
+    setTokenError(null);
+    setDropinInstance(null);
+    void supabase.functions.invoke('create-braintree-client-token', { body: {} })
+      .then(({ data, error }) => {
+        if (error) throw error;
+        const token = (data as { clientToken?: unknown } | null)?.clientToken;
+        if (typeof token !== 'string' || !token) throw new Error('Missing Braintree client token');
+        if (!cancelled) setClientToken(token);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Could not initialize payment form.';
+        setTokenError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingToken(false);
+      });
+    return () => {
+      cancelled = true;
+      setDropinInstance(null);
+    };
+  }, [goalId]);
 
   const submit = async () => {
-    if (!stripe || !elements || submitting) return;
-    const card = elements.getElement(CardElement);
-    if (!card) return toast.error('Please enter card details first.');
+    if (!dropinInstance || submitting) return;
     setSubmitting(true);
     try {
-      const { error, paymentMethod } = await stripe.createPaymentMethod({ type: 'card', card });
-      if (error || !paymentMethod?.id) {
-        toast.error(error?.message ?? 'Could not save your card details.');
+      const method = await dropinInstance.requestPaymentMethod();
+      const nonce = method?.nonce;
+      if (!nonce) return toast.error('Please enter card details first.');
+
+      const { data, error: invokeError } = await supabase.functions.invoke('retry-failed-goal-payment', {
+        body: { goalId, paymentMethodNonce: nonce },
+      });
+      if (invokeError) {
+        let message = await getInvokeErrorMessage(invokeError, 'Could not complete the donation transfer.');
+        if (message.toLowerCase().includes('non-2xx status code')) {
+          const lastPaymentError = await getGoalLastPaymentError(goalId);
+          if (lastPaymentError) message = lastPaymentError;
+        }
+        toast.error(message);
         return;
       }
-      const { data, error: invokeError } = await supabase.functions.invoke('retry-failed-goal-payment', {
-        body: { goalId, paymentMethodId: paymentMethod.id },
-      });
-      if (invokeError || data?.success === false) {
-        toast.error(data?.error ?? invokeError?.message ?? 'Could not complete the donation transfer.');
+      if (data?.success === false) {
+        const fallback = await getGoalLastPaymentError(goalId);
+        toast.error(data?.error ?? fallback ?? 'Could not complete the donation transfer.');
         return;
       }
       toast.success('Stake donation completed successfully.');
       onSuccess();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not complete payment retry.');
+    } catch (err: unknown) {
+      toast.error(await getInvokeErrorMessage(err, 'Could not complete payment retry.'));
     } finally {
       setSubmitting(false);
     }
@@ -80,18 +164,120 @@ function RetryPaymentCardForm({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl bg-muted p-3">
-        <CardElement
-          options={CARD_ELEMENT_OPTIONS}
-          onChange={(event: StripeCardElementChangeEvent) => {
-            setCardComplete(event.complete);
-          }}
-        />
+      <style>{`
+        .retry-braintree .braintree-dropin,
+        .retry-braintree .braintree-dropin * {
+          color: hsl(var(--foreground)) !important;
+          border-color: hsl(var(--border)) !important;
+        }
+        .retry-braintree,
+        .retry-braintree:focus,
+        .retry-braintree:focus-within,
+        .retry-braintree .braintree-dropin,
+        .retry-braintree .braintree-dropin:focus,
+        .retry-braintree .braintree-dropin:focus-within {
+          outline: none !important;
+          box-shadow: none !important;
+        }
+        .retry-braintree .braintree-dropin,
+        .retry-braintree .braintree-dropin-wrapper,
+        .retry-braintree [id^="braintree--dropin__"] {
+          background: hsl(var(--background)) !important;
+          border-radius: 16px !important;
+          overflow: hidden !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-upper-container,
+        .retry-braintree .braintree-dropin .braintree-sheet__container,
+        .retry-braintree .braintree-dropin .braintree-sheet,
+        .retry-braintree .braintree-dropin .braintree-sheet__header,
+        .retry-braintree .braintree-dropin .braintree-sheet__content,
+        .retry-braintree .braintree-dropin .braintree-sheet__content--form {
+          background: hsl(var(--background)) !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-upper-container,
+        .retry-braintree .braintree-dropin .braintree-sheet__container,
+        .retry-braintree .braintree-dropin .braintree-card,
+        .retry-braintree .braintree-dropin .braintree-sheet {
+          border-radius: 16px !important;
+          overflow: hidden !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          border: 0 !important;
+          box-shadow: none !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-sheet__header {
+          border-bottom: 1px solid hsl(var(--border)) !important;
+          border-radius: 0 !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-sheet__content,
+        .retry-braintree .braintree-dropin .braintree-sheet__content--form {
+          border-radius: 0 !important;
+          background: hsl(var(--muted)) !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-form__field-group,
+        .retry-braintree .braintree-dropin .braintree-form__field {
+          background: hsl(var(--muted)) !important;
+          border: 0 !important;
+          outline: 0 !important;
+          border-radius: 12px !important;
+          box-shadow: none !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-form__field-group:focus-within,
+        .retry-braintree .braintree-dropin [data-braintree-id="cardholder-name-field-group"],
+        .retry-braintree .braintree-dropin [data-braintree-id="number-field-group"],
+        .retry-braintree .braintree-dropin [data-braintree-id="expiration-date-field-group"] {
+          background: hsl(var(--muted)) !important;
+          border: 0 !important;
+          outline: 0 !important;
+          box-shadow: none !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-form__flexible-fields,
+        .retry-braintree .braintree-dropin .braintree-form__flexible-field {
+          background: transparent !important;
+          border: 0 !important;
+          box-shadow: none !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-placeholder,
+        .retry-braintree .braintree-dropin .braintree-form__label {
+          color: hsl(var(--muted-foreground)) !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-lower-container,
+        .retry-braintree .braintree-dropin [data-braintree-id="lower-container"],
+        .retry-braintree .braintree-dropin .braintree-loader__container,
+        .retry-braintree .braintree-dropin [data-braintree-id="loading-container"] {
+          display: none !important;
+        }
+      `}</style>
+      <div className="retry-braintree relative min-h-[180px]">
+        {loadingToken && <p className="text-xs text-muted-foreground">Loading secure card form…</p>}
+        {tokenError && <p className="text-xs text-destructive">{tokenError}</p>}
+        {clientToken && (
+          <DropIn
+            options={{
+              authorization: clientToken,
+              preselectVaultedPaymentMethod: false,
+              card: { cardholderName: true },
+              paypal: false,
+            }}
+            onInstance={(instance) => {
+              setDropinInstance(instance);
+              // Force fresh card entry instead of silently reusing an old vaulted selection.
+              try {
+                instance.clearSelectedPaymentMethod();
+              } catch {
+                // ignore
+              }
+            }}
+          />
+        )}
       </div>
+      <p className="text-center text-xs font-medium uppercase tracking-widest text-muted-foreground/80">
+        HOLD TO ACCEPT
+      </p>
       <HoldToConfirmButton
         variant="default"
         className="w-full min-h-[56px] rounded-2xl glow-primary font-display text-base font-bold"
-        disabled={!stripe || !elements || !cardComplete || submitting}
+        disabled={!dropinInstance || loadingToken || !!tokenError || submitting}
         idleLabel={submitting ? 'Donating…' : 'Update card and donate now'}
         holdingLabel="Sure?"
         onConfirm={() => void submit()}
@@ -110,7 +296,6 @@ export default function Settings() {
   const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const { currency, setCurrency } = useStakeCurrencyPreference();
-  const { enabled: allowShortDeadlines, setEnabled: setAllowShortDeadlines } = useShortDeadlineTesting();
   const [currencySearch, setCurrencySearch] = useState('');
   const [currencyPickerOpen, setCurrencyPickerOpen] = useState(false);
   const currencyPickerRef = useRef<HTMLDivElement | null>(null);
@@ -125,19 +310,24 @@ export default function Settings() {
     title: string | null;
   } | null>(null);
   const retryPaidRef = useRef(false);
+  const transactionCurrencies = useMemo(() => resolveTransactionCurrencies(), []);
 
   useEffect(() => {
+    if (!transactionCurrencies.includes(currency)) {
+      setCurrency(transactionCurrencies[0]);
+      return;
+    }
     setCurrencySearch(formatStakeCurrencyLabel(currency));
-  }, [currency]);
+  }, [currency, transactionCurrencies]);
 
   const filteredCurrencies = useMemo(() => {
     const q = currencySearch.trim().toLowerCase();
-    if (!q) return SUPPORTED_STAKE_CURRENCIES;
-    return SUPPORTED_STAKE_CURRENCIES.filter((code) => {
+    if (!q) return transactionCurrencies;
+    return transactionCurrencies.filter((code) => {
       const label = formatStakeCurrencyLabel(code).toLowerCase();
       return label.includes(q) || code.toLowerCase().includes(q);
     });
-  }, [currencySearch]);
+  }, [currencySearch, transactionCurrencies]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -257,6 +447,27 @@ export default function Settings() {
     () => failedPaymentGoals.find((goal) => goal.id === retryWindowGoalId) ?? null,
     [failedPaymentGoals, retryWindowGoalId],
   );
+  const newestActiveStakedGoal = useMemo(
+    () =>
+      goals
+        .filter((g) => g.status === 'active' && g.stake > 0)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null,
+    [goals],
+  );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (retryWindowOpen) {
+      root.style.setProperty('--oweit-sonner-z', '110');
+      return () => {
+        root.style.removeProperty('--oweit-sonner-z');
+      };
+    }
+    root.style.removeProperty('--oweit-sonner-z');
+    return () => {
+      root.style.removeProperty('--oweit-sonner-z');
+    };
+  }, [retryWindowOpen]);
 
   const closeRetryWindow = (open: boolean) => {
     setRetryWindowOpen(open);
@@ -278,6 +489,29 @@ export default function Settings() {
     setRetryGoalId(null);
     setRetryToastContext(null);
     retryPaidRef.current = false;
+  };
+
+  const openRetryWindowForNewestActiveGoal = () => {
+    if (!newestActiveStakedGoal) {
+      toast.error('No active staked goals found to test.');
+      return;
+    }
+    setFailedPaymentGoals((prev) => {
+      if (prev.some((goal) => goal.id === newestActiveStakedGoal.id)) return prev;
+      return [
+        {
+          id: newestActiveStakedGoal.id,
+          title: newestActiveStakedGoal.title,
+          stake: newestActiveStakedGoal.stake,
+        },
+        ...prev,
+      ];
+    });
+    setRetryToastContext(null);
+    retryPaidRef.current = false;
+    setRetryWindowGoalId(newestActiveStakedGoal.id);
+    setRetryGoalId(newestActiveStakedGoal.id);
+    setRetryWindowOpen(true);
   };
 
   const confirmDeleteAccount = async () => {
@@ -334,63 +568,6 @@ export default function Settings() {
       </div>
 
       <div className="px-6 space-y-6">
-        <Button
-            type="button"
-            variant="outline"
-            className="w-full rounded-xl border-dashed"
-            onClick={async () => {
-              let {
-                data: { session },
-              } = await supabase.auth.getSession();
-              if (!session?.access_token) {
-                const refreshResult = await supabase.auth.refreshSession();
-                session = refreshResult.data.session;
-              }
-              const accessToken = String(session?.access_token ?? '').trim().replace(/^Bearer\s+/i, '');
-              if (!accessToken) {
-                toast.error('Session expired. Please sign in again.');
-                return;
-              }
-
-              const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-              const apikey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
-              if (!supabaseUrl || !apikey) {
-                toast.error('Supabase env is missing in app configuration.');
-                return;
-              }
-
-              const res = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/debug-trigger-payment-failed-alert`, {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                  apikey,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({}),
-              });
-
-              const raw = await res.text();
-              let parsed: { success?: boolean; error?: string } | null = null;
-              try {
-                parsed = raw ? JSON.parse(raw) : null;
-              } catch {
-                parsed = null;
-              }
-
-              if (!res.ok || parsed?.success === false) {
-                toast.error(parsed?.error ?? raw?.trim() ?? `Debug trigger failed (${res.status}).`);
-                return;
-              }
-              toast.success('Debug payment-failed flow triggered.');
-              await Promise.all([
-                queryClient.invalidateQueries({ queryKey: queryKeys.goals(user?.id ?? '') }),
-                queryClient.invalidateQueries({ queryKey: queryKeys.goalsAsJudge(user?.id ?? '') }),
-              ]);
-            }}
-          >
-            Debug: trigger failed transfer on latest goal
-        </Button>
-
         <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
           <div>
             <p className="text-sm font-medium text-foreground">Stake currency</p>
@@ -444,25 +621,6 @@ export default function Settings() {
         </div>
 
         <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">Allow short deadlines (testing)</p>
-              <p className="text-xs text-muted-foreground">
-                Enables creating goals with deadlines in less than 24 hours.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setAllowShortDeadlines(!allowShortDeadlines)}
-              className={`w-12 h-7 rounded-full transition-colors relative ${allowShortDeadlines ? 'bg-primary' : 'bg-border'}`}
-              aria-label="Toggle short deadline testing mode"
-            >
-              <div className={`w-5 h-5 rounded-full bg-foreground absolute top-1 transition-transform ${allowShortDeadlines ? 'translate-x-6' : 'translate-x-1'}`} />
-            </button>
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
               <LogOut className="w-4 h-4 text-muted-foreground" />
@@ -480,6 +638,28 @@ export default function Settings() {
             onClick={() => setSignOutDialogOpen(true)}
           >
             Sign out
+          </Button>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
+          <div>
+            <p className="text-sm font-medium text-foreground">Retry payment flow test</p>
+            <p className="text-xs text-muted-foreground">
+              Opens the card-fix modal for your newest active staked goal.
+            </p>
+            {newestActiveStakedGoal && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Newest active goal: <span className="text-foreground">{newestActiveStakedGoal.title}</span>
+              </p>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            className="w-full bg-transparent rounded-xl font-display font-semibold"
+            disabled={!newestActiveStakedGoal}
+            onClick={openRetryWindowForNewestActiveGoal}
+          >
+            Open newest active goal
           </Button>
         </div>
 
@@ -506,27 +686,42 @@ export default function Settings() {
         </div>
       </div>
 
-      <AlertDialog
-        open={retryWindowOpen}
-        onOpenChange={closeRetryWindow}
-      >
-        <AlertDialogContent className="max-w-md border-border sm:rounded-2xl">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-xl font-display font-bold text-foreground pr-8">
-              Fix failed stake transfer
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-left text-sm text-muted-foreground">
-              Update your card details to donate the staked amount for this uncompleted goal.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {retryWindowGoal ? (
-            <div className="rounded-xl border border-border p-3 space-y-2">
-              <p className="text-sm font-medium text-foreground">{retryWindowGoal.title}</p>
-              <p className="text-xs text-muted-foreground">
-                Stake to donate: {formatStakeAmount(retryWindowGoal.stake, currency)}
+      {retryWindowOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-[95] bg-background/80 backdrop-blur-sm"
+            onClick={() => closeRetryWindow(false)}
+          />
+          <div className="fixed bottom-0 left-0 right-0 z-[100] bg-[#0f0f0f] border-t border-border rounded-t-[32px] h-[640px] max-h-[90vh] overflow-y-visible overflow-x-hidden [color-scheme:dark]">
+            <div className="relative h-full flex flex-col p-6" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-display font-bold text-foreground">Fix failed stake transfer</h2>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-xl font-display font-semibold"
+                  onClick={() => closeRetryWindow(false)}
+                >
+                  Close
+                </Button>
+              </div>
+              <p className="text-sm text-muted-foreground mb-3">
+                Update your card details to donate the staked amount for this uncompleted goal.
               </p>
-              {stripePromise ? (
-                <Elements stripe={stripePromise}>
+              {retryWindowGoal ? (
+                <div className="space-y-3 flex-1 min-h-0">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs uppercase tracking-widest text-muted-foreground">Goal</p>
+                    <p className="text-sm font-display font-semibold text-foreground truncate max-w-[70%] text-right">
+                      {retryWindowGoal.title}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs uppercase tracking-widest text-muted-foreground">Stake to donate</p>
+                    <p className="text-sm font-display font-bold text-primary tabular-nums">
+                      {formatStakeAmount(retryWindowGoal.stake, currency)}
+                    </p>
+                  </div>
                   <RetryPaymentCardForm
                     goalId={retryWindowGoal.id}
                     onSuccess={() => {
@@ -536,21 +731,14 @@ export default function Settings() {
                       void queryClient.invalidateQueries({ queryKey: queryKeys.goals(user?.id ?? '') });
                     }}
                   />
-                </Elements>
+                </div>
               ) : (
-                <p className="text-xs text-destructive">Stripe is not configured in this build.</p>
+                <p className="text-sm text-muted-foreground">Could not find the goal for this payment alert.</p>
               )}
             </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">Could not find the goal for this payment alert.</p>
-          )}
-          <AlertDialogFooter className="gap-2 sm:gap-0">
-            <AlertDialogCancel className="mt-0 sm:mt-0 rounded-xl font-display font-semibold">
-              Close
-            </AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          </div>
+        </>
+      )}
 
       <AlertDialog
         open={signOutDialogOpen}

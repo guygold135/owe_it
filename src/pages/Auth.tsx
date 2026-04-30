@@ -42,6 +42,11 @@ export default function Auth() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const displayNameInputRef = useRef<HTMLInputElement>(null);
+  const emailInputRef = useRef<HTMLInputElement>(null);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
+  const [displayNameError, setDisplayNameError] = useState(false);
+  const [emailError, setEmailError] = useState(false);
+  const [passwordError, setPasswordError] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoadingProvider, setOauthLoadingProvider] = useState<'google' | null>(null);
@@ -79,18 +84,51 @@ export default function Auth() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Clear previous field errors on every submit attempt.
+    setDisplayNameError(false);
+    setEmailError(false);
+    setPasswordError(false);
+
     const rawDisplayName =
       mode === 'signup' && displayNameInputRef.current
         ? displayNameInputRef.current.value
         : displayName;
     const signupName = String(rawDisplayName).trim();
+
+    const isValidEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+
+    if (mode === 'signup' && !signupName) {
+      toast.error('Display name is required.');
+      setDisplayNameError(true);
+      displayNameInputRef.current?.focus();
+      return;
+    }
+
     if (mode === 'signup' && isElevenDigitDisplayName(signupName)) {
       toast.error(
         'Display name cannot be exactly 11 digits (reserved). Add a letter or use a different length.',
       );
       setDisplayName(signupName.length > 0 ? signupName.slice(0, -1) : '');
+      setDisplayNameError(true);
+      displayNameInputRef.current?.focus();
       return;
     }
+
+    if (!isValidEmail(email)) {
+      toast.error('Please enter a valid email address.');
+      setEmailError(true);
+      emailInputRef.current?.focus();
+      return;
+    }
+
+    if (password.length < 6) {
+      toast.error('Password must be at least 6 characters long.');
+      setPasswordError(true);
+      passwordInputRef.current?.focus();
+      return;
+    }
+
     if (mode === 'signup') {
       setDisplayName(signupName);
     }
@@ -126,7 +164,27 @@ export default function Auth() {
         setEmailPendingConfirmation(null);
       }
     } catch (error: any) {
-      toast.error(error.message);
+      const message = String(error?.message ?? 'Something went wrong.');
+      toast.error(message);
+
+      const lower = message.toLowerCase();
+      if (
+        mode === 'signup' &&
+        (lower.includes('display name') ||
+          lower.includes('username') ||
+          lower.includes('already taken') ||
+          lower.includes('taken') ||
+          lower.includes('11 digits'))
+      ) {
+        setDisplayNameError(true);
+        displayNameInputRef.current?.focus();
+      } else if (lower.includes('email')) {
+        setEmailError(true);
+        emailInputRef.current?.focus();
+      } else if (lower.includes('password')) {
+        setPasswordError(true);
+        passwordInputRef.current?.focus();
+      }
     } finally {
       setLoading(false);
     }
@@ -167,6 +225,7 @@ export default function Auth() {
   };
 
   const handleDisplayNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setDisplayNameError(false);
     const next = e.target.value;
     if (isElevenDigitDisplayName(next)) {
       toast.error(
@@ -180,6 +239,7 @@ export default function Auth() {
   };
 
   const handleDisplayNameBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    setDisplayNameError(false);
     let v = e.target.value;
     if (isElevenDigitDisplayName(v)) {
       toast.error(
@@ -274,7 +334,9 @@ export default function Auth() {
                   value={displayName}
                   onChange={handleDisplayNameChange}
                   onBlur={handleDisplayNameBlur}
-                  className="bg-card border-border rounded-2xl h-12 px-4"
+                className={`bg-card border-border rounded-2xl h-12 px-4 ${
+                  displayNameError ? 'border-destructive ring-2 ring-destructive focus-visible:ring-destructive' : ''
+                }`}
                   autoComplete="nickname"
                   minLength={1}
                   required
@@ -288,8 +350,14 @@ export default function Auth() {
             type="email"
             placeholder="Email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="bg-card border-border rounded-2xl h-12 px-4"
+            ref={emailInputRef}
+            onChange={(e) => {
+              setEmailError(false);
+              setEmail(e.target.value);
+            }}
+            className={`bg-card border-border rounded-2xl h-12 px-4 ${
+              emailError ? 'border-destructive ring-2 ring-destructive focus-visible:ring-destructive' : ''
+            }`}
             required
           />
 
@@ -298,8 +366,14 @@ export default function Auth() {
               type={showPassword ? 'text' : 'password'}
               placeholder="Password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="bg-card border-border rounded-2xl h-12 px-4 pr-12"
+              ref={passwordInputRef}
+              onChange={(e) => {
+                setPasswordError(false);
+                setPassword(e.target.value);
+              }}
+              className={`bg-card border-border rounded-2xl h-12 px-4 pr-12 ${
+                passwordError ? 'border-destructive ring-2 ring-destructive focus-visible:ring-destructive' : ''
+              }`}
               required
               minLength={6}
             />

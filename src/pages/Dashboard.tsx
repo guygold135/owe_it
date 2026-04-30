@@ -474,6 +474,9 @@ export default function Dashboard() {
   const contractGoals = useDashboardVisibleContracts(goals);
   const spotlightGoalIds = useMemo(() => new Set(spotlightGoals.map((g) => g.id)), [spotlightGoals]);
   const [tutorialDeleteGoalId, setTutorialDeleteGoalId] = useState<string | null>(null);
+  const emptyStateInlinePlusRef = useRef<HTMLSpanElement | null>(null);
+  const [emptyStateArrowPath, setEmptyStateArrowPath] = useState<string>('');
+  const [arrowViewport, setArrowViewport] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const sortedContractGoals = useMemo(
     () =>
       [...contractGoals]
@@ -486,6 +489,92 @@ export default function Dashboard() {
       }),
     [contractGoals, spotlightGoalIds],
   );
+  const showEmptyHint = sortedContractGoals.length === 0 && spotlightGoals.length === 0;
+
+  useEffect(() => {
+    if (!showEmptyHint) {
+      setEmptyStateArrowPath('');
+      return;
+    }
+
+    let rafId = 0;
+    const updateArrow = () => {
+      const startEl = emptyStateInlinePlusRef.current;
+      const endEl = document.querySelector('[data-create-goal-fab="true"]') as HTMLElement | null;
+      const navInnerEl = document.querySelector('[data-bottom-nav-inner="true"]') as HTMLElement | null;
+      if (!startEl || !endEl) {
+        setEmptyStateArrowPath('');
+        return;
+      }
+
+      const start = startEl.getBoundingClientRect();
+      const end = endEl.getBoundingClientRect();
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      setArrowViewport({ w, h });
+
+      // Start below the inline + badge, go down first so it doesn't cross hint text.
+      const sx = start.left + start.width / 2;
+      const sy = start.top + start.height + 10;
+      const ex = end.left + end.width / 2;
+      const navTop = navInnerEl?.getBoundingClientRect().top ?? end.top;
+      // Hard cap so no part of the arrow can touch/cross the nav container.
+      const bottomLimit = navTop - 16;
+      const clampY = (y: number) => Math.min(y, bottomLimit);
+      // End above the fixed bottom nav so the arrow does not touch it.
+      const ey = clampY(end.top - 18);
+
+      // Continuous cubic chain with tangent continuity, so the curve stays smooth near the bottom nav.
+      const p0 = { x: sx, y: sy };
+      const p1 = { x: sx + 58, y: clampY(sy + 126) };
+      const p2 = { x: sx + 78, y: clampY(sy + 76) };
+      const p3 = { x: sx + 88, y: clampY(sy + 148) };
+      const p4 = { x: ex, y: ey };
+
+      const c1a = { x: sx - 6, y: clampY(sy + 64) };
+      const c2a = { x: sx + 18, y: clampY(sy + 120) };
+
+      const c1b = { x: 2 * p1.x - c2a.x, y: clampY(2 * p1.y - c2a.y) };
+      const c2b = { x: sx + 108, y: clampY(sy + 96) };
+
+      const c1c = { x: 2 * p2.x - c2b.x, y: clampY(2 * p2.y - c2b.y) };
+      const c2c = { x: sx + 44, y: clampY(sy + 126) };
+
+      const c1d = { x: 2 * p3.x - c2c.x, y: clampY(2 * p3.y - c2c.y) };
+      const c2d = { x: ex - 22, y: clampY(ey - 118) };
+
+      const d = [
+        `M ${p0.x} ${p0.y}`,
+        `C ${c1a.x} ${c1a.y}, ${c2a.x} ${c2a.y}, ${p1.x} ${p1.y}`,
+        `C ${c1b.x} ${c1b.y}, ${c2b.x} ${c2b.y}, ${p2.x} ${p2.y}`,
+        `C ${c1c.x} ${c1c.y}, ${c2c.x} ${c2c.y}, ${p3.x} ${p3.y}`,
+        `C ${c1d.x} ${c1d.y}, ${c2d.x} ${c2d.y}, ${p4.x} ${p4.y}`,
+      ].join(' ');
+
+      setEmptyStateArrowPath(d);
+    };
+
+    const schedule = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(updateArrow);
+    };
+
+    schedule();
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, { passive: true });
+    // On refresh, BottomNav/FAB can mount slightly after the empty-state block.
+    // Observe DOM mutations so the arrow draws as soon as both anchors exist.
+    const observer = new MutationObserver(() => {
+      schedule();
+    });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule);
+      observer.disconnect();
+    };
+  }, [showEmptyHint]);
 
   const [orderedGoalIds, setOrderedGoalIds] = useState<string[]>([]);
 
@@ -881,16 +970,15 @@ export default function Dashboard() {
     <div className="min-h-screen bg-background pb-28">
       {/* Header */}
       <div className="px-6 pt-12 pb-6 flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0 flex-1">
           <motion.h1
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="text-xl font-display font-extrabold text-foreground mt-2 tracking-tight leading-snug text-balance pr-2"
+            className="mt-2 pr-4 text-base sm:text-xl font-display font-extrabold leading-snug tracking-tight text-balance text-foreground"
           >
-            Win for yourself or give for a cause.
-            <br />
-            Either way, something good happens.
+            <span className="block whitespace-nowrap">Win for yourself or give for a cause.</span>
+            <span className="block whitespace-nowrap">Either way, something good happens.</span>
           </motion.h1>
         </div>
         <UserProfilePopover />
@@ -1067,17 +1155,57 @@ export default function Dashboard() {
               </div>
             )}
             <ResolvedGoalSpotlight goals={spotlightGoals} />
-            {sortedContractGoals.length === 0 ? (
-              <div className="text-center py-16">
-                <p className="text-muted-foreground">no active goals</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  tap{' '}
-                  <span className="mx-1 inline-flex h-5 w-5 align-[-0.125rem] items-center justify-center rounded-[6.5px] bg-primary glow-primary">
-                    <Plus className="h-3 w-3 text-primary-foreground" aria-hidden />
-                  </span>{' '}
-                  to creat a goal
-                </p>
-              </div>
+            {showEmptyHint ? (
+              <>
+                <div className="text-center pt-2 pb-10">
+                  <p className="text-muted-foreground">no active goals</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    tap{' '}
+                    <span
+                      ref={emptyStateInlinePlusRef}
+                      className="mx-1 inline-flex h-5 w-5 align-[-0.125rem] items-center justify-center rounded-[6.5px] bg-primary glow-primary"
+                    >
+                      <Plus className="h-3 w-3 text-primary-foreground" aria-hidden />
+                    </span>{' '}
+                    to creat a goal!
+                  </p>
+                </div>
+
+                {/* Empty-state hint: polished looping arrow toward the create-goal FAB. */}
+                <div className="pointer-events-none fixed inset-0 z-[35]" aria-hidden>
+                  <svg
+                    viewBox={`0 0 ${Math.max(arrowViewport.w, 1)} ${Math.max(arrowViewport.h, 1)}`}
+                    className="h-full w-full opacity-90"
+                    preserveAspectRatio="none"
+                  >
+                    <defs>
+                      <marker
+                        id="dashboard-empty-goals-arrowhead"
+                        viewBox="0 0 12 12"
+                        refX="10.5"
+                        refY="6"
+                        markerWidth="5"
+                        markerHeight="5"
+                        orient="auto"
+                      >
+                        <path d="M 0 0 L 12 6 L 0 12 z" fill="hsl(var(--primary))" />
+                      </marker>
+                    </defs>
+                    {emptyStateArrowPath ? (
+                      <path
+                        d={emptyStateArrowPath}
+                        fill="none"
+                        stroke="hsl(var(--primary))"
+                        strokeWidth="1.35"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        vectorEffect="non-scaling-stroke"
+                        markerEnd="url(#dashboard-empty-goals-arrowhead)"
+                      />
+                    ) : null}
+                  </svg>
+                </div>
+              </>
             ) : (
               <DndContext
                 sensors={sensors}

@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Elements, CardElement, useElements, useStripe } from '@stripe/react-stripe-js';
-import type { StripeCardElementChangeEvent } from '@stripe/stripe-js';
+import DropIn, { type Dropin } from 'braintree-web-drop-in-react';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { HoldToConfirmButton } from '@/components/ui/hold-to-confirm-button';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
-import { stripePromise } from '@/lib/stripe';
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
 import { formatStakeAmount } from '@/lib/currency';
 import { toast } from 'sonner';
@@ -15,16 +13,53 @@ import { queryKeys } from '@/lib/queryKeys';
 import { useAuth } from '@/hooks/useAuth';
 import { getCharityOptionById } from '@/lib/charities';
 
-const CARD_ELEMENT_OPTIONS = {
-  style: {
-    base: {
-      fontSize: '16px',
-      color: '#f4f4f5',
-      '::placeholder': { color: '#9ca3af' },
-    },
-    invalid: { color: '#f87171' },
-  },
-};
+async function getInvokeErrorMessage(error: unknown, fallback: string): Promise<string> {
+  if (error && typeof error === 'object') {
+    const maybeContext = (error as { context?: Response }).context;
+    if (maybeContext instanceof Response) {
+      try {
+        const payload = (await maybeContext.clone().json()) as {
+          error?: unknown;
+          debug?: { provider?: unknown; environment?: unknown; currency?: unknown; merchantAccountId?: unknown };
+        };
+        if (typeof payload.error === 'string' && payload.error.trim()) {
+          const debug = payload.debug;
+          const provider = typeof debug?.provider === 'string' ? debug.provider : 'provider';
+          const environment = typeof debug?.environment === 'string' ? debug.environment : 'unknown';
+          const currency = typeof debug?.currency === 'string' ? debug.currency : 'unknown';
+          const merchantAccountId =
+            typeof debug?.merchantAccountId === 'string' && debug.merchantAccountId.trim()
+              ? debug.merchantAccountId
+              : 'none';
+          const debugSuffix = debug
+            ? ` (${provider} env=${environment} currency=${currency} merchant=${merchantAccountId})`
+            : '';
+          return `${payload.error.trim()}${debugSuffix}`;
+        }
+      } catch {
+        try {
+          const text = await maybeContext.clone().text();
+          if (text.trim()) return text.trim();
+        } catch {
+          // ignore
+        }
+      }
+    }
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+  }
+  return fallback;
+}
+
+function normalizePaymentErrorMessage(rawMessage: string): string {
+  const normalized = rawMessage.trim().toLowerCase();
+  if (normalized.includes("do not honor")) {
+    const debugMatch = rawMessage.match(/\s(\([^()]*env=[^()]*\))\s*$/i);
+    const debugSuffix = debugMatch ? ` ${debugMatch[1]}` : "";
+    return `Your bank declined this card (Do Not Honor). Please use a different card or contact your bank.${debugSuffix}`;
+  }
+  return rawMessage;
+}
 
 function RetryPaymentCardForm({
   goalId,
@@ -33,33 +68,87 @@ function RetryPaymentCardForm({
   goalId: string;
   onSuccess: () => void;
 }) {
-  const stripe = useStripe();
-  const elements = useElements();
+  const [clientToken, setClientToken] = useState<string | null>(null);
+  const [loadingToken, setLoadingToken] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [dropinInstance, setDropinInstance] = useState<Dropin | null>(null);
+  const [paymentMethodReady, setPaymentMethodReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [cardComplete, setCardComplete] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingToken(true);
+    setTokenError(null);
+    setDropinInstance(null);
+    setPaymentMethodReady(false);
+    void supabase.functions.invoke('create-braintree-client-token', { body: {} })
+      .then(({ data, error }) => {
+        if (error) throw error;
+        const token = (data as { clientToken?: unknown } | null)?.clientToken;
+        if (typeof token !== 'string' || !token) throw new Error('Missing Braintree client token');
+        if (!cancelled) setClientToken(token);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Could not initialize payment form.';
+        setTokenError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingToken(false);
+      });
+    return () => {
+      cancelled = true;
+      setDropinInstance(null);
+      setPaymentMethodReady(false);
+    };
+  }, [goalId]);
 
   const submit = async () => {
-    if (!stripe || !elements || submitting) return;
-    const card = elements.getElement(CardElement);
-    if (!card) return toast.error('Please enter card details first.');
+    if (!dropinInstance || submitting) return;
     setSubmitting(true);
     try {
-      const { error, paymentMethod } = await stripe.createPaymentMethod({ type: 'card', card });
-      if (error || !paymentMethod?.id) {
-        toast.error(error?.message ?? 'Could not save your card details.');
+      const method = await dropinInstance.requestPaymentMethod();
+      const nonce = method?.nonce;
+      if (!nonce) return toast.error('Please enter card details first.');
+      const { data, error: invokeError } = await supabase.functions.invoke('retry-failed-goal-payment', {
+        body: { goalId, paymentMethodNonce: nonce },
+      });
+      if (invokeError) {
+        const message = normalizePaymentErrorMessage(
+          await getInvokeErrorMessage(invokeError, 'Could not complete the donation transfer.'),
+        );
+        toast.error(message);
+        try {
+          await dropinInstance.clearSelectedPaymentMethod();
+          setPaymentMethodReady(false);
+        } catch {
+          // ignore reset failures
+        }
         return;
       }
-      const { data, error: invokeError } = await supabase.functions.invoke('retry-failed-goal-payment', {
-        body: { goalId, paymentMethodId: paymentMethod.id },
-      });
-      if (invokeError || data?.success === false) {
-        toast.error(data?.error ?? invokeError?.message ?? 'Could not complete the donation transfer.');
+      if (data?.success === false) {
+        const debug = (data as {
+          debug?: { provider?: string; environment?: string; currency?: string; merchantAccountId?: string | null };
+        } | null)?.debug;
+        const debugSuffix = debug
+          ? ` (${debug.provider ?? 'provider'} env=${debug.environment ?? 'unknown'} currency=${debug.currency ?? 'unknown'} merchant=${debug.merchantAccountId ?? 'none'})`
+          : '';
+        const message = normalizePaymentErrorMessage(
+          `${data?.error ?? 'Could not complete the donation transfer.'}${debugSuffix}`,
+        );
+        toast.error(message);
+        try {
+          await dropinInstance.clearSelectedPaymentMethod();
+          setPaymentMethodReady(false);
+        } catch {
+          // ignore reset failures
+        }
         return;
       }
       toast.success('Stake donation completed successfully.');
       onSuccess();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not complete payment retry.');
+    } catch (err: unknown) {
+      toast.error(await getInvokeErrorMessage(err, 'Could not complete payment retry.'));
     } finally {
       setSubmitting(false);
     }
@@ -67,16 +156,122 @@ function RetryPaymentCardForm({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl bg-muted p-3">
-        <CardElement
-          options={CARD_ELEMENT_OPTIONS}
-          onChange={(event: StripeCardElementChangeEvent) => setCardComplete(event.complete)}
-        />
+      <style>{`
+        .retry-braintree .braintree-dropin,
+        .retry-braintree .braintree-dropin * {
+          color: hsl(var(--foreground)) !important;
+          border-color: hsl(var(--border)) !important;
+        }
+        .retry-braintree,
+        .retry-braintree:focus,
+        .retry-braintree:focus-within,
+        .retry-braintree .braintree-dropin,
+        .retry-braintree .braintree-dropin:focus,
+        .retry-braintree .braintree-dropin:focus-within {
+          outline: none !important;
+          box-shadow: none !important;
+        }
+        .retry-braintree .braintree-dropin,
+        .retry-braintree .braintree-dropin-wrapper,
+        .retry-braintree [id^="braintree--dropin__"] {
+          background: hsl(var(--background)) !important;
+          border-radius: 16px !important;
+          overflow: hidden !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-upper-container,
+        .retry-braintree .braintree-dropin .braintree-sheet__container,
+        .retry-braintree .braintree-dropin .braintree-sheet,
+        .retry-braintree .braintree-dropin .braintree-sheet__header,
+        .retry-braintree .braintree-dropin .braintree-sheet__content,
+        .retry-braintree .braintree-dropin .braintree-sheet__content--form {
+          background: hsl(var(--background)) !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-upper-container,
+        .retry-braintree .braintree-dropin .braintree-sheet__container,
+        .retry-braintree .braintree-dropin .braintree-card,
+        .retry-braintree .braintree-dropin .braintree-sheet {
+          border-radius: 16px !important;
+          overflow: hidden !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          border: 0 !important;
+          box-shadow: none !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-sheet__header {
+          border-bottom: 1px solid hsl(var(--border)) !important;
+          border-radius: 0 !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-sheet__content,
+        .retry-braintree .braintree-dropin .braintree-sheet__content--form {
+          border-radius: 0 !important;
+          background: hsl(var(--muted)) !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-form__field-group,
+        .retry-braintree .braintree-dropin .braintree-form__field {
+          background: hsl(var(--muted)) !important;
+          border: 0 !important;
+          outline: 0 !important;
+          border-radius: 12px !important;
+          box-shadow: none !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-form__field-group:focus-within,
+        .retry-braintree .braintree-dropin [data-braintree-id="cardholder-name-field-group"],
+        .retry-braintree .braintree-dropin [data-braintree-id="number-field-group"],
+        .retry-braintree .braintree-dropin [data-braintree-id="expiration-date-field-group"] {
+          background: hsl(var(--muted)) !important;
+          border: 0 !important;
+          outline: 0 !important;
+          box-shadow: none !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-form__flexible-fields,
+        .retry-braintree .braintree-dropin .braintree-form__flexible-field {
+          background: transparent !important;
+          border: 0 !important;
+          box-shadow: none !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-placeholder,
+        .retry-braintree .braintree-dropin .braintree-form__label {
+          color: hsl(var(--muted-foreground)) !important;
+        }
+        .retry-braintree .braintree-dropin .braintree-lower-container,
+        .retry-braintree .braintree-dropin [data-braintree-id="lower-container"],
+        .retry-braintree .braintree-dropin .braintree-loader__container,
+        .retry-braintree .braintree-dropin [data-braintree-id="loading-container"] {
+          display: none !important;
+        }
+      `}</style>
+      <div className="retry-braintree relative min-h-[180px]">
+        {loadingToken && <p className="text-xs text-muted-foreground">Loading secure card form…</p>}
+        {tokenError && <p className="text-xs text-destructive">{tokenError}</p>}
+        {clientToken && (
+          <DropIn
+            options={{
+              authorization: clientToken,
+              preselectVaultedPaymentMethod: false,
+              card: { cardholderName: true },
+              paypal: false,
+            }}
+            onInstance={(instance) => {
+              setDropinInstance(instance);
+              setPaymentMethodReady(false);
+              try {
+                instance.clearSelectedPaymentMethod();
+              } catch {
+                // ignore
+              }
+            }}
+            onPaymentMethodRequestable={() => setPaymentMethodReady(true)}
+            onNoPaymentMethodRequestable={() => setPaymentMethodReady(false)}
+          />
+        )}
       </div>
+      <p className="text-center text-xs font-medium uppercase tracking-widest text-muted-foreground/80">
+        HOLD TO ACCEPT
+      </p>
       <HoldToConfirmButton
         variant="default"
         className="w-full min-h-[56px] rounded-2xl glow-primary font-display text-base font-bold"
-        disabled={!stripe || !elements || !cardComplete || submitting}
+        disabled={!dropinInstance || !paymentMethodReady || loadingToken || !!tokenError || submitting}
         idleLabel={submitting ? 'Donating…' : 'Update card and donate now'}
         holdingLabel="Sure?"
         onConfirm={() => void submit()}
@@ -199,6 +394,20 @@ export function RetryPaymentModalHost() {
     return () => window.removeEventListener('confirm-dismiss-payment-failed', onConfirmDismiss as EventListener);
   }, []);
 
+  useEffect(() => {
+    const root = document.documentElement;
+    if (open || dismissConfirmOpen) {
+      root.style.setProperty('--oweit-sonner-z', '110');
+      return () => {
+        root.style.removeProperty('--oweit-sonner-z');
+      };
+    }
+    root.style.removeProperty('--oweit-sonner-z');
+    return () => {
+      root.style.removeProperty('--oweit-sonner-z');
+    };
+  }, [open, dismissConfirmOpen]);
+
   const close = (nextOpen: boolean) => {
     setOpen(nextOpen);
     if (nextOpen) return;
@@ -219,7 +428,7 @@ export function RetryPaymentModalHost() {
   return (
     <>
       <AlertDialog open={open} onOpenChange={close}>
-        <AlertDialogContent className="max-w-md border-border sm:rounded-2xl">
+        <AlertDialogContent className="w-[min(94vw,56rem)] max-w-4xl max-h-[80vh] overflow-y-auto border-border sm:rounded-2xl">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-xl font-display font-bold text-foreground pr-8">
               Fix failed stake transfer
@@ -232,20 +441,14 @@ export function RetryPaymentModalHost() {
             <div className="rounded-xl border border-border p-3 space-y-2">
               <p className="text-sm font-medium text-foreground">{goal.title}</p>
               <p className="text-xs text-muted-foreground">Stake to donate: {formatStakeAmount(goal.stake, currency)}</p>
-              {stripePromise ? (
-                <Elements stripe={stripePromise}>
-                  <RetryPaymentCardForm
-                    goalId={goal.id}
-                    onSuccess={() => {
-                      paidRef.current = true;
-                      close(false);
-                      void queryClient.invalidateQueries({ queryKey: queryKeys.goals(user?.id ?? '') });
-                    }}
-                  />
-                </Elements>
-              ) : (
-                <p className="text-xs text-destructive">Stripe is not configured in this build.</p>
-              )}
+              <RetryPaymentCardForm
+                goalId={goal.id}
+                onSuccess={() => {
+                  paidRef.current = true;
+                  close(false);
+                  void queryClient.invalidateQueries({ queryKey: queryKeys.goals(user?.id ?? '') });
+                }}
+              />
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">Could not find the goal for this payment alert.</p>
@@ -261,18 +464,6 @@ export function RetryPaymentModalHost() {
         onOpenChange={(nextOpen) => {
           setDismissConfirmOpen(nextOpen);
           if (!nextOpen) {
-            if (!confirmDismissAcceptedRef.current && dismissConfirmContext?.notificationId) {
-              window.dispatchEvent(
-                new CustomEvent('retry-payment-window-cancelled', {
-                  detail: {
-                    notificationId: dismissConfirmContext.notificationId,
-                    goalId: dismissConfirmContext.goalId,
-                    kind: dismissConfirmContext.kind,
-                    title: dismissConfirmContext.title,
-                  },
-                }),
-              );
-            }
             confirmDismissAcceptedRef.current = false;
             setDismissConfirmContext(null);
           }
@@ -302,11 +493,31 @@ export function RetryPaymentModalHost() {
                 setDismissConfirmOpen(false);
                 setDismissConfirmContext(null);
                 if (!ctx?.notificationId || !user?.id) return;
-                await supabase
-                  .from('in_app_notifications')
-                  .update({ read_at: new Date().toISOString() })
-                  .eq('id', ctx.notificationId)
-                  .eq('user_id', user.id);
+
+                // Ensure the toast dismissal doesn't re-open the confirmation flow.
+                window.dispatchEvent(
+                  new CustomEvent('suppress-payment-failed-toast-onDismiss', {
+                    detail: { toastId: `payment_failed_${ctx.notificationId}` },
+                  }),
+                );
+              toast.dismiss(`payment_failed_${ctx.notificationId}`);
+
+              const { error } = await supabase
+                .from('in_app_notifications')
+                .update({ read_at: new Date().toISOString() })
+                .eq('id', ctx.notificationId)
+                .eq('user_id', user.id);
+
+              if (error) {
+                console.warn('Failed to persist payment-failed dismissal', error);
+              }
+
+              // Also persist locally so the toast/dialog never comes back on refresh/restart.
+              window.dispatchEvent(
+                new CustomEvent('payment-failed-dismissed', {
+                  detail: { notificationId: ctx.notificationId },
+                }),
+              );
               }}
             >
               Yes, dismiss alert

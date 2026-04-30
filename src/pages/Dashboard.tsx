@@ -521,9 +521,11 @@ export default function Dashboard() {
       const sy = start.top + start.height + 10 - hint.top;
       const ex = end.left + end.width / 2 - hint.left;
       const navTop = navInnerEl?.getBoundingClientRect().top ?? end.top;
-      // Lock arrow endpoint directly to the FAB top-center area.
-      const ey = end.top + 8 - hint.top;
-      const clampY = (y: number) => Math.min(y, navTop - 10 - hint.top);
+      // Hard boundary: arrow must stay above the fixed bottom nav container.
+      const navSafeTop = navTop - 18 - hint.top;
+      // Lock endpoint toward FAB, but never allow touching/underlapping nav.
+      const ey = Math.min(end.top + 8 - hint.top, navSafeTop);
+      const clampY = (y: number) => Math.min(y, navSafeTop);
 
       // Continuous cubic chain with tangent continuity, so the curve stays smooth near the bottom nav.
       const p0 = { x: sx, y: sy };

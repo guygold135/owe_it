@@ -335,10 +335,11 @@ export function RetryPaymentModalHost() {
             toast.error('Could not open card fix window for this alert.');
             return;
           }
+          const row = data as { id: string; title: string | null; stake: number | null };
           setGoal({
-            id: String((data as any).id),
-            title: String((data as any).title ?? 'Goal'),
-            stake: Number((data as any).stake ?? 0),
+            id: String(row.id),
+            title: String(row.title ?? 'Goal'),
+            stake: Number(row.stake ?? 0),
           });
           setOpen(true);
         });

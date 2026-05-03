@@ -28,8 +28,8 @@ export function PasswordRecoveryScreen() {
     try {
       await updatePassword(password);
       toast.success('Password updated. You are signed in.');
-    } catch (error: any) {
-      toast.error(error?.message ?? 'Could not update password.');
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Could not update password.');
     } finally {
       setLoading(false);
     }

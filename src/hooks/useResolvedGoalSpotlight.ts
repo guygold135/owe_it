@@ -8,21 +8,20 @@ const SPOTLIGHT_MS = 5 * 60 * 1000;
  * based on their actual `resolvedAt` timestamp.
  */
 export function useResolvedGoalSpotlight(goals: Goal[]) {
-  const [tick, setTick] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
   const spotlightGoals = useMemo(() => {
-    const now = Date.now();
     return goals.filter((g) => {
       if (g.status !== 'completed' && g.status !== 'failed') return false;
       if (!g.resolvedAt) return false;
       return now - g.resolvedAt.getTime() < SPOTLIGHT_MS;
     });
-  }, [goals, tick]);
+  }, [goals, now]);
 
   return spotlightGoals;
 }

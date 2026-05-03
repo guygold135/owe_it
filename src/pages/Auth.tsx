@@ -163,8 +163,8 @@ export default function Auth() {
         await signIn(email, password);
         setEmailPendingConfirmation(null);
       }
-    } catch (error: any) {
-      const message = String(error?.message ?? 'Something went wrong.');
+    } catch (error: unknown) {
+      const message = String(error instanceof Error ? error.message : 'Something went wrong.');
       toast.error(message);
 
       const lower = message.toLowerCase();
@@ -200,8 +200,8 @@ export default function Auth() {
     try {
       await sendPasswordResetEmail(trimmed);
       toast.success('Check your email for a link to reset your password.');
-    } catch (error: any) {
-      toast.error(error?.message ?? 'Could not send reset email.');
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Could not send reset email.');
     } finally {
       setResetSending(false);
     }
@@ -217,8 +217,8 @@ export default function Auth() {
     try {
       await resendSignupConfirmation(target);
       toast.success('Sent again. Check spam and promotions folders.');
-    } catch (error: any) {
-      toast.error(error?.message ?? 'Could not resend the email.');
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Could not resend the email.');
     } finally {
       setResendConfirmBusy(false);
     }
@@ -255,8 +255,8 @@ export default function Auth() {
     setOauthLoadingProvider(provider);
     try {
       await signInWithOAuth(provider);
-    } catch (error: any) {
-      toast.error(error?.message ?? `Could not continue with ${provider}.`);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : `Could not continue with ${provider}.`);
       setOauthLoadingProvider(null);
     }
   };

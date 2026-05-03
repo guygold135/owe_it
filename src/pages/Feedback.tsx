@@ -54,8 +54,8 @@ export default function Feedback() {
       if (data?.emailed === false) {
         toast.message("Saved successfully. Email forwarding is not configured yet.");
       }
-    } catch (err: any) {
-      toast.error(err?.message || "Could not send feedback. Please try again.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Could not send feedback. Please try again.");
     } finally {
       setSubmitting(false);
     }

@@ -11,10 +11,11 @@ async function getFreshAccessToken(): Promise<string> {
     throw new Error(userError.message ?? 'Not authenticated.');
   }
 
-  let {
-    data: { session },
+  const {
+    data: { session: initialSession },
     error: sessionError,
   } = await supabase.auth.getSession();
+  let session = initialSession;
   if (sessionError) {
     console.error('Could not read auth session before invoking edge function', sessionError);
   }

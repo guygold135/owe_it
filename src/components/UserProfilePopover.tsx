@@ -67,7 +67,7 @@ export default function UserProfilePopover() {
         .maybeSingle();
 
       if (error) {
-        const msg = String((error as any)?.message ?? "").toLowerCase();
+        const msg = String("message" in error ? error.message : "").toLowerCase();
         if (msg.includes("friend_code") && (msg.includes("column") || msg.includes("schema") || msg.includes("does not exist"))) {
           setFriendCodeDbReady(false);
         }
@@ -95,14 +95,14 @@ export default function UserProfilePopover() {
           .maybeSingle();
 
         if (!updateError) {
-          const saved = (updated as any)?.friend_code ?? null;
+          const saved = (updated as { friend_code?: string | null } | null)?.friend_code ?? null;
           if (saved) {
             setFriendCode(saved);
             window.localStorage.setItem(localKey, saved);
           }
           break;
         }
-        const umsg = String((updateError as any)?.message ?? "").toLowerCase();
+        const umsg = String("message" in updateError ? updateError.message : "").toLowerCase();
         if (umsg.includes("friend_code") && (umsg.includes("column") || umsg.includes("schema") || umsg.includes("does not exist"))) {
           setFriendCodeDbReady(false);
           break;

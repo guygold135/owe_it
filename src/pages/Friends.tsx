@@ -179,7 +179,7 @@ export default function Friends() {
 
     if (error) {
       console.error('Friend search error', error);
-      const msg = String((error as any)?.message ?? '').toLowerCase();
+      const msg = String('message' in error ? error.message : '').toLowerCase();
       if (msg.includes('friend_code') && (msg.includes('column') || msg.includes('schema') || msg.includes('does not exist'))) {
         setSearchError('account id is not enabled yet (db update needed)');
       } else {
@@ -191,11 +191,17 @@ export default function Friends() {
       setSearchError(isAccountId ? 'No user found with that Account ID.' : 'No user found with that username.');
       return;
     }
+    const profile = data as {
+      id: string;
+      display_name: string | null;
+      avatar_url: string | null;
+      friend_code: string | null;
+    };
     setSearchResult({
-      id: (data as any).id,
-      display_name: (data as any).display_name ?? '',
-      avatar_url: (data as any).avatar_url ?? null,
-      friend_code: (data as any).friend_code ?? null,
+      id: profile.id,
+      display_name: profile.display_name ?? '',
+      avatar_url: profile.avatar_url ?? null,
+      friend_code: profile.friend_code ?? null,
     });
   };
 

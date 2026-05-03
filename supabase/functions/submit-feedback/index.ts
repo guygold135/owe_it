@@ -150,8 +150,9 @@ serve(async (req: Request): Promise<Response> => {
       success: true,
       emailed: emailResult.emailed,
     }, corsHeaders);
-  } catch (err: any) {
-    console.error("submit-feedback error:", err?.message ?? err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("submit-feedback error:", message);
     return jsonResponse({ error: "Unexpected server error" }, corsHeaders, 500);
   }
 });

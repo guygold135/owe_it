@@ -318,7 +318,7 @@ export default function Settings() {
       return;
     }
     setCurrencySearch(formatStakeCurrencyLabel(currency));
-  }, [currency, transactionCurrencies]);
+  }, [currency, transactionCurrencies, setCurrency]);
 
   const filteredCurrencies = useMemo(() => {
     const q = currencySearch.trim().toLowerCase();
@@ -375,7 +375,7 @@ export default function Settings() {
       .then(({ data, error }) => {
         if (error) return;
         setFailedPaymentGoals(
-          (data ?? []).map((row: any) => ({
+          (data ?? []).map((row: { id: string; title: string | null; stake: number | null }) => ({
             id: String(row.id),
             title: String(row.title ?? 'Goal'),
             stake: Number(row.stake ?? 0),
@@ -422,10 +422,11 @@ export default function Settings() {
             toast.error('Could not open card fix window for this alert.');
             return;
           }
+          const row = data as { id: string; title: string | null; stake: number | null };
           const fetchedGoal = {
-            id: String((data as any).id),
-            title: String((data as any).title ?? 'Goal'),
-            stake: Number((data as any).stake ?? 0),
+            id: String(row.id),
+            title: String(row.title ?? 'Goal'),
+            stake: Number(row.stake ?? 0),
           };
           setFailedPaymentGoals((prev) => {
             if (prev.some((goal) => goal.id === fetchedGoal.id)) return prev;

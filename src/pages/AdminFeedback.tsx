@@ -67,12 +67,13 @@ export default function AdminFeedback() {
         body: {},
       });
       if (error) throw new Error(error.message || 'Could not load feedback.');
-      if (data && typeof data === 'object' && 'error' in data && (data as any).error) {
-        throw new Error(String((data as any).error));
+      if (data && typeof data === 'object' && 'error' in data) {
+        const errVal = (data as { error?: unknown }).error;
+        if (errVal) throw new Error(String(errVal));
       }
       setFeedback((data?.feedback as FeedbackRow[]) ?? []);
-    } catch (err: any) {
-      const msg = err?.message ?? 'Could not load feedback.';
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not load feedback.';
       toast.error(msg);
       setFeedback([]);
     } finally {
@@ -82,7 +83,6 @@ export default function AdminFeedback() {
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

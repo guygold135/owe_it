@@ -447,13 +447,6 @@ export default function Settings() {
     () => failedPaymentGoals.find((goal) => goal.id === retryWindowGoalId) ?? null,
     [failedPaymentGoals, retryWindowGoalId],
   );
-  const newestActiveStakedGoal = useMemo(
-    () =>
-      goals
-        .filter((g) => g.status === 'active' && g.stake > 0)
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null,
-    [goals],
-  );
 
   useEffect(() => {
     const root = document.documentElement;
@@ -489,29 +482,6 @@ export default function Settings() {
     setRetryGoalId(null);
     setRetryToastContext(null);
     retryPaidRef.current = false;
-  };
-
-  const openRetryWindowForNewestActiveGoal = () => {
-    if (!newestActiveStakedGoal) {
-      toast.error('No active staked goals found to test.');
-      return;
-    }
-    setFailedPaymentGoals((prev) => {
-      if (prev.some((goal) => goal.id === newestActiveStakedGoal.id)) return prev;
-      return [
-        {
-          id: newestActiveStakedGoal.id,
-          title: newestActiveStakedGoal.title,
-          stake: newestActiveStakedGoal.stake,
-        },
-        ...prev,
-      ];
-    });
-    setRetryToastContext(null);
-    retryPaidRef.current = false;
-    setRetryWindowGoalId(newestActiveStakedGoal.id);
-    setRetryGoalId(newestActiveStakedGoal.id);
-    setRetryWindowOpen(true);
   };
 
   const confirmDeleteAccount = async () => {
@@ -638,28 +608,6 @@ export default function Settings() {
             onClick={() => setSignOutDialogOpen(true)}
           >
             Sign out
-          </Button>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
-          <div>
-            <p className="text-sm font-medium text-foreground">Retry payment flow test</p>
-            <p className="text-xs text-muted-foreground">
-              Opens the card-fix modal for your newest active staked goal.
-            </p>
-            {newestActiveStakedGoal && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Newest active goal: <span className="text-foreground">{newestActiveStakedGoal.title}</span>
-              </p>
-            )}
-          </div>
-          <Button
-            variant="outline"
-            className="w-full bg-transparent rounded-xl font-display font-semibold"
-            disabled={!newestActiveStakedGoal}
-            onClick={openRetryWindowForNewestActiveGoal}
-          >
-            Open newest active goal
           </Button>
         </div>
 

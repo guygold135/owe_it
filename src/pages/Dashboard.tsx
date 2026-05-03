@@ -527,32 +527,73 @@ export default function Dashboard() {
       const ey = Math.min(end.top + 8 - hint.top, navSafeTop);
       const clampY = (y: number) => Math.min(y, navSafeTop);
 
-      // Continuous cubic chain with tangent continuity, so the curve stays smooth near the bottom nav.
-      const p0 = { x: sx, y: sy };
-      const p1 = { x: sx + 58, y: clampY(sy + 126) };
-      const p2 = { x: sx + 78, y: clampY(sy + 76) };
-      const p3 = { x: sx + 88, y: clampY(sy + 148) };
-      const p4 = { x: ex, y: ey };
+      // Keep the existing mobile curve behavior exactly as-is.
+      // On desktop/full-screen viewports, use a different end segment so the curl stays visible.
+      const desktopWide = window.innerWidth >= 1000;
+      const d = (() => {
+        if (!desktopWide) {
+          // Continuous cubic chain with tangent continuity, so the curve stays smooth near the bottom nav.
+          const p0 = { x: sx, y: sy };
+          const p1 = { x: sx + 58, y: clampY(sy + 126) };
+          const p2 = { x: sx + 78, y: clampY(sy + 76) };
+          const p3 = { x: sx + 88, y: clampY(sy + 148) };
+          const p4 = { x: ex, y: ey };
 
-      const c1a = { x: sx - 6, y: clampY(sy + 64) };
-      const c2a = { x: sx + 18, y: clampY(sy + 120) };
+          const c1a = { x: sx - 6, y: clampY(sy + 64) };
+          const c2a = { x: sx + 18, y: clampY(sy + 120) };
 
-      const c1b = { x: 2 * p1.x - c2a.x, y: clampY(2 * p1.y - c2a.y) };
-      const c2b = { x: sx + 108, y: clampY(sy + 96) };
+          const c1b = { x: 2 * p1.x - c2a.x, y: clampY(2 * p1.y - c2a.y) };
+          const c2b = { x: sx + 108, y: clampY(sy + 96) };
 
-      const c1c = { x: 2 * p2.x - c2b.x, y: clampY(2 * p2.y - c2b.y) };
-      const c2c = { x: sx + 44, y: clampY(sy + 126) };
+          const c1c = { x: 2 * p2.x - c2b.x, y: clampY(2 * p2.y - c2b.y) };
+          const c2c = { x: sx + 44, y: clampY(sy + 126) };
 
-      const c1d = { x: 2 * p3.x - c2c.x, y: clampY(2 * p3.y - c2c.y) };
-      const c2d = { x: ex - 22, y: clampY(ey - 118) };
+          const c1d = { x: 2 * p3.x - c2c.x, y: clampY(2 * p3.y - c2c.y) };
+          const c2d = { x: ex - 22, y: clampY(ey - 118) };
 
-      const d = [
-        `M ${p0.x} ${p0.y}`,
-        `C ${c1a.x} ${c1a.y}, ${c2a.x} ${c2a.y}, ${p1.x} ${p1.y}`,
-        `C ${c1b.x} ${c1b.y}, ${c2b.x} ${c2b.y}, ${p2.x} ${p2.y}`,
-        `C ${c1c.x} ${c1c.y}, ${c2c.x} ${c2c.y}, ${p3.x} ${p3.y}`,
-        `C ${c1d.x} ${c1d.y}, ${c2d.x} ${c2d.y}, ${p4.x} ${p4.y}`,
-      ].join(' ');
+          return [
+            `M ${p0.x} ${p0.y}`,
+            `C ${c1a.x} ${c1a.y}, ${c2a.x} ${c2a.y}, ${p1.x} ${p1.y}`,
+            `C ${c1b.x} ${c1b.y}, ${c2b.x} ${c2b.y}, ${p2.x} ${p2.y}`,
+            `C ${c1c.x} ${c1c.y}, ${c2c.x} ${c2c.y}, ${p3.x} ${p3.y}`,
+            `C ${c1d.x} ${c1d.y}, ${c2d.x} ${c2d.y}, ${p4.x} ${p4.y}`,
+          ].join(' ');
+        }
+
+        const dx = Math.max(ex - sx, 0);
+        const pull = Math.min(Math.max(dx * 0.48, 130), 240);
+        const tailLift = Math.min(Math.max(dx * 0.22, 60), 120);
+
+        const p0 = { x: sx, y: sy };
+        const p1 = { x: sx + 64, y: clampY(sy + 132) };
+        const p2 = { x: sx + 94, y: clampY(sy + 82) };
+        const p3 = { x: sx + 104, y: clampY(sy + 156) };
+        const p4 = { x: ex, y: ey };
+
+        const c1a = { x: sx - 8, y: clampY(sy + 66) };
+        const c2a = { x: sx + 22, y: clampY(sy + 124) };
+
+        const c1b = { x: 2 * p1.x - c2a.x, y: clampY(2 * p1.y - c2a.y) };
+        const c2b = { x: sx + 118, y: clampY(sy + 102) };
+
+        const c1c = { x: 2 * p2.x - c2b.x, y: clampY(2 * p2.y - c2b.y) };
+        const c2c = { x: sx + 50, y: clampY(sy + 132) };
+
+        const c1d = { x: 2 * p3.x - c2c.x, y: clampY(2 * p3.y - c2c.y) };
+        // Make the final approach more vertical: keep the last handle near endpoint X.
+        const c2d = {
+          x: ex - Math.min(Math.max(dx * 0.06, 12), 26),
+          y: clampY(ey - (132 + tailLift + Math.min(Math.max(dx * 0.1, 22), 44))),
+        };
+
+        return [
+          `M ${p0.x} ${p0.y}`,
+          `C ${c1a.x} ${c1a.y}, ${c2a.x} ${c2a.y}, ${p1.x} ${p1.y}`,
+          `C ${c1b.x} ${c1b.y}, ${c2b.x} ${c2b.y}, ${p2.x} ${p2.y}`,
+          `C ${c1c.x} ${c1c.y}, ${c2c.x} ${c2c.y}, ${p3.x} ${p3.y}`,
+          `C ${c1d.x} ${c1d.y}, ${c2d.x} ${c2d.y}, ${p4.x} ${p4.y}`,
+        ].join(' ');
+      })();
 
       if (emptyStateArrowPathRef.current !== d) {
         emptyStateArrowPathRef.current = d;

@@ -81,6 +81,52 @@ import {
 
 const DND_ACTIVATION_MS = 320;
 
+/**
+ * A single long cubic from the curl (p3) to the FAB aliases and looks jagged on tall viewports.
+ * Keep the decorative cubics, then after a fixed distance along the chord use a straight segment.
+ */
+function emptyHintArrowTailFromP3(
+  p3: { x: number; y: number },
+  c1d: { x: number; y: number },
+  ex: number,
+  ey: number,
+  clampY: (y: number) => number,
+  fallbackC2d: { x: number; y: number },
+): string[] {
+  const chordDx = ex - p3.x;
+  const chordDy = ey - p3.y;
+  const chordLen = Math.hypot(chordDx, chordDy);
+  if (chordLen < 2) {
+    return [`C ${c1d.x} ${c1d.y}, ${fallbackC2d.x} ${fallbackC2d.y}, ${ex} ${ey}`];
+  }
+  const ux = chordDx / chordLen;
+  const uy = chordDy / chordLen;
+
+  const SPLIT_IF_LONGER_THAN = 280;
+  if (chordLen < SPLIT_IF_LONGER_THAN) {
+    return [`C ${c1d.x} ${c1d.y}, ${fallbackC2d.x} ${fallbackC2d.y}, ${ex} ${ey}`];
+  }
+
+  const STRAIGHT_START_ALONG = 210;
+  const smoothCap = Math.min(115, chordLen * 0.18);
+  const along = Math.min(Math.max(smoothCap, STRAIGHT_START_ALONG), chordLen - 32);
+
+  const jx = p3.x + ux * along;
+  const jy = clampY(p3.y + uy * along);
+  const handle = Math.min(along * 0.38, 95);
+  const c2d = { x: jx - ux * handle, y: clampY(jy - uy * handle) };
+
+  return [`C ${c1d.x} ${c1d.y}, ${c2d.x} ${c2d.y}, ${jx} ${jy}`, `L ${ex} ${ey}`];
+}
+
+/** Insert vertical slack *above* the fixed loop when start→FAB gap exceeds a baseline (tall layouts). */
+function emptyHintStretchAboveLoop(gapY: number): number {
+  const STRETCH_AFTER_GAP = 400;
+  const MAX_EXTRA = 280;
+  if (gapY <= STRETCH_AFTER_GAP) return 0;
+  return Math.min((gapY - STRETCH_AFTER_GAP) * 0.48, MAX_EXTRA);
+}
+
 /** Nested goals + section sortables confuse `closestCorners`; section drags must only hit section ids. */
 function dashboardCollisionDetection(getGoalIds: () => string[]): CollisionDetection {
   return (args) => {
@@ -527,61 +573,63 @@ export default function Dashboard() {
       const ey = Math.min(end.top + 8 - hint.top, navSafeTop);
       const clampY = (y: number) => Math.min(y, navSafeTop);
 
+      const gapY = Math.max(ey - sy, 0);
+      const extraY = emptyHintStretchAboveLoop(gapY);
+
       // Keep the existing mobile curve behavior exactly as-is.
       // On desktop/full-screen viewports, use a different end segment so the curl stays visible.
       const desktopWide = window.innerWidth >= 1000;
       const d = (() => {
         if (!desktopWide) {
           // Continuous cubic chain with tangent continuity, so the curve stays smooth near the bottom nav.
+          // First segment only stretches vertically when `extraY` > 0; loop (p1→p2→p3) stays the same shape, shifted down.
+          const span1 = extraY + 126;
           const p0 = { x: sx, y: sy };
-          const p1 = { x: sx + 58, y: clampY(sy + 126) };
-          const p2 = { x: sx + 78, y: clampY(sy + 76) };
-          const p3 = { x: sx + 88, y: clampY(sy + 148) };
-          const p4 = { x: ex, y: ey };
+          const p1 = { x: sx + 58, y: clampY(sy + extraY + 126) };
+          const p2 = { x: sx + 78, y: clampY(sy + extraY + 76) };
+          const p3 = { x: sx + 88, y: clampY(sy + extraY + 148) };
 
-          const c1a = { x: sx - 6, y: clampY(sy + 64) };
-          const c2a = { x: sx + 18, y: clampY(sy + 120) };
+          const c1a = { x: sx - 6, y: clampY(sy + (64 / 126) * span1) };
+          const c2a = { x: sx + 18, y: clampY(sy + (120 / 126) * span1) };
 
           const c1b = { x: 2 * p1.x - c2a.x, y: clampY(2 * p1.y - c2a.y) };
-          const c2b = { x: sx + 108, y: clampY(sy + 96) };
+          const c2b = { x: sx + 108, y: clampY(p1.y - 30) };
 
           const c1c = { x: 2 * p2.x - c2b.x, y: clampY(2 * p2.y - c2b.y) };
-          const c2c = { x: sx + 44, y: clampY(sy + 126) };
+          const c2c = { x: sx + 44, y: clampY(p1.y) };
 
           const c1d = { x: 2 * p3.x - c2c.x, y: clampY(2 * p3.y - c2c.y) };
-          const c2d = { x: ex - 22, y: clampY(ey - 118) };
+          const c2dFallback = { x: ex - 22, y: clampY(ey - 118) };
 
           return [
             `M ${p0.x} ${p0.y}`,
             `C ${c1a.x} ${c1a.y}, ${c2a.x} ${c2a.y}, ${p1.x} ${p1.y}`,
             `C ${c1b.x} ${c1b.y}, ${c2b.x} ${c2b.y}, ${p2.x} ${p2.y}`,
             `C ${c1c.x} ${c1c.y}, ${c2c.x} ${c2c.y}, ${p3.x} ${p3.y}`,
-            `C ${c1d.x} ${c1d.y}, ${c2d.x} ${c2d.y}, ${p4.x} ${p4.y}`,
+            ...emptyHintArrowTailFromP3(p3, c1d, ex, ey, clampY, c2dFallback),
           ].join(' ');
         }
 
         const dx = Math.max(ex - sx, 0);
-        const pull = Math.min(Math.max(dx * 0.48, 130), 240);
         const tailLift = Math.min(Math.max(dx * 0.22, 60), 120);
 
+        const span1 = extraY + 132;
         const p0 = { x: sx, y: sy };
-        const p1 = { x: sx + 64, y: clampY(sy + 132) };
-        const p2 = { x: sx + 94, y: clampY(sy + 82) };
-        const p3 = { x: sx + 104, y: clampY(sy + 156) };
-        const p4 = { x: ex, y: ey };
+        const p1 = { x: sx + 64, y: clampY(sy + extraY + 132) };
+        const p2 = { x: sx + 94, y: clampY(sy + extraY + 82) };
+        const p3 = { x: sx + 104, y: clampY(sy + extraY + 156) };
 
-        const c1a = { x: sx - 8, y: clampY(sy + 66) };
-        const c2a = { x: sx + 22, y: clampY(sy + 124) };
+        const c1a = { x: sx - 8, y: clampY(sy + (66 / 132) * span1) };
+        const c2a = { x: sx + 22, y: clampY(sy + (124 / 132) * span1) };
 
         const c1b = { x: 2 * p1.x - c2a.x, y: clampY(2 * p1.y - c2a.y) };
-        const c2b = { x: sx + 118, y: clampY(sy + 102) };
+        const c2b = { x: sx + 118, y: clampY(p1.y - 30) };
 
         const c1c = { x: 2 * p2.x - c2b.x, y: clampY(2 * p2.y - c2b.y) };
-        const c2c = { x: sx + 50, y: clampY(sy + 132) };
+        const c2c = { x: sx + 50, y: clampY(p1.y) };
 
         const c1d = { x: 2 * p3.x - c2c.x, y: clampY(2 * p3.y - c2c.y) };
-        // Make the final approach more vertical: keep the last handle near endpoint X.
-        const c2d = {
+        const c2dFallback = {
           x: ex - Math.min(Math.max(dx * 0.06, 12), 26),
           y: clampY(ey - (132 + tailLift + Math.min(Math.max(dx * 0.1, 22), 44))),
         };
@@ -591,7 +639,7 @@ export default function Dashboard() {
           `C ${c1a.x} ${c1a.y}, ${c2a.x} ${c2a.y}, ${p1.x} ${p1.y}`,
           `C ${c1b.x} ${c1b.y}, ${c2b.x} ${c2b.y}, ${p2.x} ${p2.y}`,
           `C ${c1c.x} ${c1c.y}, ${c2c.x} ${c2c.y}, ${p3.x} ${p3.y}`,
-          `C ${c1d.x} ${c1d.y}, ${c2d.x} ${c2d.y}, ${p4.x} ${p4.y}`,
+          ...emptyHintArrowTailFromP3(p3, c1d, ex, ey, clampY, c2dFallback),
         ].join(' ');
       })();
 
@@ -602,7 +650,7 @@ export default function Dashboard() {
 
       const nextCanvas = {
         w: Math.max(Math.ceil(hint.width), Math.ceil(ex + 48), Math.ceil(sx + 120), 1),
-        h: Math.max(Math.ceil(hint.height), Math.ceil(ey + 48), Math.ceil(sy + 180), 1),
+        h: Math.max(Math.ceil(hint.height), Math.ceil(ey + 48), Math.ceil(sy + 180 + extraY), 1),
       };
       if (
         emptyStateArrowCanvasRef.current.w !== nextCanvas.w ||

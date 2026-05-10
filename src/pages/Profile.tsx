@@ -571,7 +571,7 @@ function ProfileInner() {
         milestones: GOAL_COUNT_MILESTONES,
       }),
     ];
-  }, [stats]);
+  }, [stats, goals, judgeGoals]);
 
   const loading = goalsLoading || judgeGoalsLoading || profileLoading;
 

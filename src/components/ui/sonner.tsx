@@ -46,4 +46,6 @@ const Toaster = ({ ...props }: ToasterProps) => {
   );
 };
 
+// `toast` is a runtime API from sonner, re-exported for app convenience.
+// eslint-disable-next-line react-refresh/only-export-components
 export { Toaster, toast };

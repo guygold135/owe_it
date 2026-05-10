@@ -386,6 +386,8 @@ export function AppTutorialProvider({
   return <AppTutorialContext.Provider value={value}>{children}</AppTutorialContext.Provider>;
 }
 
+// Hook is colocated with provider; valid pattern for context modules.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAppTutorial(): AppTutorialContextValue {
   const ctx = useContext(AppTutorialContext);
   if (!ctx) {

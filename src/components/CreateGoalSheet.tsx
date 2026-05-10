@@ -10,6 +10,7 @@ import { useGoals } from '@/hooks/useGoals';
 import { useAuth } from '@/hooks/useAuth';
 import { Goal, Judge, Friend } from '@/lib/types';
 import { supabase } from '@/integrations/supabase/client';
+import type { Json } from '@/integrations/supabase/types';
 import { toast } from 'sonner';
 import { formatStakeAmount } from '@/lib/currency';
 import { stakeMajorToStripeUnits } from '@/lib/stripeCurrency';
@@ -85,10 +86,11 @@ async function callCreateCheckoutWithSession(body: Record<string, unknown>) {
     throw new Error(userError.message ?? 'Not authenticated.');
   }
 
-  let {
-    data: { session },
+  const {
+    data: { session: initialSession },
     error: sessionError,
   } = await supabase.auth.getSession();
+  let session = initialSession;
   if (sessionError) {
     console.error('Could not read auth session before create-checkout', sessionError);
   }
@@ -280,7 +282,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     const d = new Date(Date.now() + minLeadMs);
     d.setSeconds(0, 0);
     return toDatetimeLocalString(d);
-  }, [open, deadline, allowShortDeadlines]);
+  }, [allowShortDeadlines]);
 
   /** Same title as another active goal (same account), case-insensitive, trimmed */
   const duplicateActiveTitle = useMemo(() => {
@@ -307,7 +309,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       return;
     }
 
-    const friendIds = (edges ?? []).map((e: any) => e.friend_user_id).filter(Boolean);
+    const friendIds = (edges ?? [])
+      .map((e: { friend_user_id: string }) => e.friend_user_id)
+      .filter(Boolean);
     if (friendIds.length === 0) {
       setFriends([]);
       return;
@@ -324,7 +328,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       return;
     }
 
-    const mapped = (profiles ?? []).map((p: any) => ({
+    const mapped: Friend[] = (profiles ?? []).map((p: { id: string; display_name: string | null; avatar_url: string | null }) => ({
       id: p.id,
       name: p.display_name ?? 'Friend',
       avatar: p.avatar_url ?? '',
@@ -332,7 +336,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       completedGoals: 0,
       totalStaked: 0,
     }));
-    mapped.sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+    mapped.sort((a, b) => String(a.name).localeCompare(String(b.name)));
     setFriends(mapped);
   }, [user?.id]);
 
@@ -406,7 +410,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
     if (error) {
       console.error('Friend search error', error);
-      const msg = String((error as any)?.message ?? '').toLowerCase();
+      const msg = String('message' in error ? error.message : '').toLowerCase();
       if (msg.includes('friend_code') && (msg.includes('column') || msg.includes('schema') || msg.includes('does not exist'))) {
         setJudgeByIdError('Account ID is not available yet.');
       } else {
@@ -418,7 +422,12 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       setJudgeByIdError(isAccountId ? 'No user found with that Account ID.' : 'No user found with that username.');
       return;
     }
-    const row = data as any;
+    const row = data as {
+      id: string;
+      display_name: string | null;
+      avatar_url: string | null;
+      friend_code: string | null;
+    };
     if (row.id === user.id) {
       setJudgeByIdError('That’s your Account ID. Pick someone else.');
       return;
@@ -726,7 +735,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
             };
             const { data, error } = await supabase.rpc('create_judge_request', {
               p_judge_user_id: judge.id,
-              p_goal_payload: payload as any,
+              p_goal_payload: payload as Json,
             });
             if (error) {
               console.error('Error creating judge request', error);
@@ -734,10 +743,10 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               setWaitingJudgeName(null);
               return;
             }
-            setJudgeRequestId(data as any);
-          } catch (e: any) {
+            setJudgeRequestId(typeof data === 'string' ? data : null);
+          } catch (e: unknown) {
             console.error('Unexpected judge request error', e);
-            toast.error(e?.message ?? 'Could not send judge request.');
+            toast.error(e instanceof Error ? e.message : 'Could not send judge request.');
             setWaitingJudgeName(null);
           }
         })();
@@ -825,7 +834,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       default:
         return null;
     }
-  }, [step]);
+  }, [step, stakeCurrency]);
 
   const sheetTutorialCalloutActive = useMemo(
     () =>
@@ -946,7 +955,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
           action: stake > 0 ? 'staked' : 'created',
           goal_title: title,
           stake,
-        } as any);
+        });
       }
     } catch (e) {
       console.error('Error inserting pulse event', e);
@@ -1156,7 +1165,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         if (!el) return;
                         // iOS Safari: opening can fail if the input is fully transparent.
                         // Prefer showPicker when available, else focus.
-                        (el as any).showPicker?.();
+                        (el as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
                         el.focus();
                       }}
                       onKeyDown={(e) => {
@@ -1164,7 +1173,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         e.preventDefault();
                         const el = deadlineInputRef.current;
                         if (!el) return;
-                        (el as any).showPicker?.();
+                        (el as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
                         el.focus();
                       }}
                       className={`relative w-full max-w-full bg-muted rounded-2xl ${

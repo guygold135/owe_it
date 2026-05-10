@@ -1,11 +1,20 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { Capacitor } from '@capacitor/core';
 import { decodeJwtPayload } from '@/lib/jwtPayload';
 import {
   clearPendingPasswordRecoveryFlag,
   hasPendingPasswordRecoveryFlag,
 } from '@/lib/sessionBootstrap';
-import type { Session } from '@supabase/supabase-js';
+import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { isElevenDigitDisplayName } from '@/lib/displayName';
 
@@ -84,7 +93,7 @@ function useProvideAuth(): AuthContextValue {
   useEffect(() => {
     let alive = true;
 
-    const ensureProfile = async (u: any | null) => {
+    const ensureProfile = async (u: User | null) => {
       if (!u?.id) return;
       if (ensuredProfileForUserRef.current === u.id) return;
       ensuredProfileForUserRef.current = u.id;
@@ -95,11 +104,8 @@ function useProvideAuth(): AuthContextValue {
 
       // Do not set avatar_url here — it would overwrite the user's saved photo on every session refresh.
       const { error } = await supabase.from('profiles').upsert(
-        {
-          id: u.id,
-          display_name: displayName ?? '',
-        } as any,
-        { onConflict: 'id' } as any
+        { id: u.id, display_name: displayName ?? '' },
+        { onConflict: 'id' },
       );
 
       if (error) {
@@ -131,7 +137,7 @@ function useProvideAuth(): AuthContextValue {
       }
     };
 
-    const mapUser = (u: any | null): AuthUser | null => {
+    const mapUser = (u: User | null): AuthUser | null => {
       if (!u) return null;
       return {
         id: u.id,
@@ -248,12 +254,15 @@ function useProvideAuth(): AuthContextValue {
     };
   }, []);
 
-  const authEmailRedirectTo = () =>
-    Capacitor.isNativePlatform()
-      ? `${window.location.origin}/#/`
-      : `${window.location.origin}/`;
+  const authEmailRedirectTo = useCallback(
+    () =>
+      Capacitor.isNativePlatform()
+        ? `${window.location.origin}/#/`
+        : `${window.location.origin}/`,
+    [],
+  );
 
-  const signUp = async (email: string, password: string, displayName?: string) => {
+  const signUp = useCallback(async (email: string, password: string, displayName?: string) => {
     const trimmedName = String(displayName ?? '').trim();
     if (!trimmedName) {
       throw new Error('Display name is required.');
@@ -317,9 +326,9 @@ function useProvideAuth(): AuthContextValue {
       return 'repeat_signup';
     }
     return 'confirm_email';
-  };
+  }, [authEmailRedirectTo]);
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -337,9 +346,9 @@ function useProvideAuth(): AuthContextValue {
         'Confirm your email before signing in. Check your inbox and spam folder, or use “Resend confirmation email” below.',
       );
     }
-  };
+  }, []);
 
-  const signInWithOAuth = async (provider: 'google' | 'apple') => {
+  const signInWithOAuth = useCallback(async (provider: 'google' | 'apple') => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
@@ -347,14 +356,14 @@ function useProvideAuth(): AuthContextValue {
       },
     });
     if (error) throw error;
-  };
+  }, []);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
-  };
+  }, []);
 
-  const sendPasswordResetEmail = async (email: string) => {
+  const sendPasswordResetEmail = useCallback(async (email: string) => {
     const trimmed = email.trim();
     const redirectTo = Capacitor.isNativePlatform()
       ? `${window.location.origin}/#/auth`
@@ -363,9 +372,9 @@ function useProvideAuth(): AuthContextValue {
       redirectTo,
     });
     if (error) throw error;
-  };
+  }, []);
 
-  const resendSignupConfirmation = async (email: string) => {
+  const resendSignupConfirmation = useCallback(async (email: string) => {
     const trimmed = email.trim();
     const { error } = await supabase.auth.resend({
       type: 'signup',
@@ -373,15 +382,15 @@ function useProvideAuth(): AuthContextValue {
       options: { emailRedirectTo: authEmailRedirectTo() },
     });
     if (error) throw error;
-  };
+  }, [authEmailRedirectTo]);
 
-  const updatePassword = async (newPassword: string) => {
+  const updatePassword = useCallback(async (newPassword: string) => {
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) throw error;
     setPasswordRecoveryPending(false);
     clearPendingPasswordRecoveryFlag();
     recoveryFromUrlRef.current = false;
-  };
+  }, []);
 
   return useMemo(
     () => ({
@@ -396,7 +405,18 @@ function useProvideAuth(): AuthContextValue {
       resendSignupConfirmation,
       updatePassword,
     }),
-    [user, loading, passwordRecoveryPending],
+    [
+      user,
+      loading,
+      passwordRecoveryPending,
+      signUp,
+      signIn,
+      signInWithOAuth,
+      signOut,
+      sendPasswordResetEmail,
+      resendSignupConfirmation,
+      updatePassword,
+    ],
   );
 }
 
@@ -405,6 +425,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- hook paired with AuthProvider in this module
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) {
@@ -412,4 +433,3 @@ export function useAuth() {
   }
   return ctx;
 }
-

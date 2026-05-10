@@ -369,9 +369,10 @@ export function DeadlineReminderToastHost() {
                 .select('title,stake,stake_currency')
                 .eq('id', row.goal_id)
                 .maybeSingle();
-              const title = String((data as any)?.title ?? row.title ?? 'Goal');
-              const stake = Number((data as any)?.stake ?? 0);
-              const stakeCurrency = normalizeStakeCurrency((data as any)?.stake_currency);
+              const goalRow = data as { title: string | null; stake: number | null; stake_currency: string | null } | null;
+              const title = String(goalRow?.title ?? row.title ?? 'Goal');
+              const stake = Number(goalRow?.stake ?? 0);
+              const stakeCurrency = normalizeStakeCurrency(goalRow?.stake_currency);
               const stakeFormatted = stake > 0 ? formatStakeAmount(stake, stakeCurrency) : null;
               descriptionNode = buildDeadlineToastDescription({ title, kind, stakeFormatted });
             }
@@ -397,6 +398,7 @@ export function DeadlineReminderToastHost() {
     return () => {
       void supabase.removeChannel(channel);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resubscribe only when userId changes; toast helpers use refs
   }, [userId]);
 
   useEffect(() => {

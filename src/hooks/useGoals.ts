@@ -143,7 +143,7 @@ export function useGoals() {
           action,
           goal_title: goal.title,
           stake: goal.stake,
-        } as any);
+        });
       } catch (e) {
         console.error('Error inserting pulse event', e);
       }
@@ -166,9 +166,16 @@ export function useGoals() {
       .eq('user_id', user.id)
       .maybeSingle();
 
-    const beforeStatus = (beforeRows as any)?.status as 'active' | 'completed' | 'failed' | undefined;
+    type GoalSnapshotRow = {
+      status: string;
+      title: string;
+      stake: number;
+      is_private: boolean;
+    };
+    const before = beforeRows as GoalSnapshotRow | null;
+    const beforeStatus = before?.status as 'active' | 'completed' | 'failed' | undefined;
 
-    const payload: any = {};
+    const payload: Record<string, unknown> = {};
     if (updates.title !== undefined) payload.title = updates.title;
     if (updates.description !== undefined) payload.description = updates.description;
     if (updates.stake !== undefined) payload.stake = updates.stake;
@@ -187,9 +194,9 @@ export function useGoals() {
       payload.resolved_at = new Date().toISOString();
       payload.resolved_by = user.id;
     }
-    const beforeTitle = (beforeRows as any)?.title as string | undefined;
-    const beforeStake = Number((beforeRows as any)?.stake ?? 0);
-    const beforeIsPrivate = Boolean((beforeRows as any)?.is_private ?? false);
+    const beforeTitle = before?.title;
+    const beforeStake = Number(before?.stake ?? 0);
+    const beforeIsPrivate = Boolean(before?.is_private ?? false);
 
     const { error } = await supabase
       .from('goals')
@@ -212,7 +219,7 @@ export function useGoals() {
             action,
             goal_title: updates.title ?? beforeTitle ?? 'Goal',
             stake: updates.stake ?? beforeStake ?? 0,
-          } as any);
+          });
         } catch (e) {
           console.error('Error inserting pulse event', e);
         }

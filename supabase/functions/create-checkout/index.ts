@@ -449,7 +449,7 @@ serve(async (req: Request): Promise<Response> => {
         insertError = retry.error;
       }
 
-      let goalId = goal?.id as string | undefined;
+      const goalId = goal?.id as string | undefined;
       if (insertError) {
         // Roll back attached payment method on DB failure to avoid orphans.
         try {
@@ -523,10 +523,11 @@ serve(async (req: Request): Promise<Response> => {
     });
 
     return jsonResponse({ sessionUrl: session.url }, corsHeaders);
-  } catch (err: any) {
-    console.error("Stripe error:", err?.message ?? err);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("Stripe error:", message);
     return jsonResponse(
-      { error: err?.message ?? "Unknown Stripe error", stage: "unexpected" },
+      { error: message || "Unknown Stripe error", stage: "unexpected" },
       corsHeaders,
       500
     );

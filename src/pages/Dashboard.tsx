@@ -127,6 +127,11 @@ function emptyHintStretchAboveLoop(gapY: number): number {
   return Math.min((gapY - STRETCH_AFTER_GAP) * 0.48, MAX_EXTRA);
 }
 
+/** Arrow tip ends this far above the FAB top (viewport px); leaves room for `markerEnd`. */
+const EMPTY_HINT_FAB_ARROW_END_GAP = 26;
+/** Clamp cubics so no segment dips into the FAB hit box (viewport px above FAB top). */
+const EMPTY_HINT_FAB_PATH_CLEAR_GAP = 18;
+
 /** Nested goals + section sortables confuse `closestCorners`; section drags must only hit section ids. */
 function dashboardCollisionDetection(getGoalIds: () => string[]): CollisionDetection {
   return (args) => {
@@ -569,9 +574,11 @@ export default function Dashboard() {
       const navTop = navInnerEl?.getBoundingClientRect().top ?? end.top;
       // Hard boundary: arrow must stay above the fixed bottom nav container.
       const navSafeTop = navTop - 18 - hint.top;
-      // Lock endpoint toward FAB, but never allow touching/underlapping nav.
-      const ey = Math.min(end.top + 8 - hint.top, navSafeTop);
-      const clampY = (y: number) => Math.min(y, navSafeTop);
+      const fabTop = end.top - hint.top;
+      // Stay above the FAB (tip + stroke) and above the tab bar.
+      const curveMaxY = Math.min(navSafeTop, fabTop - EMPTY_HINT_FAB_PATH_CLEAR_GAP);
+      const ey = Math.min(fabTop - EMPTY_HINT_FAB_ARROW_END_GAP, curveMaxY);
+      const clampY = (y: number) => Math.min(y, curveMaxY);
 
       const gapY = Math.max(ey - sy, 0);
       const extraY = emptyHintStretchAboveLoop(gapY);
@@ -1074,7 +1081,7 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="min-h-screen bg-background pb-28">
+    <div className="min-h-screen bg-background pb-36">
       {/* Header */}
       <div className="px-6 pt-12 pb-6 flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">

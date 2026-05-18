@@ -31,63 +31,69 @@ export function BottomNav({
     prefetchPath(queryClient, path, user?.id);
   };
 
+  const zChrome = highlightTab || tabTourBlocking ? 'z-[50]' : fabTutorialSpotlight ? 'z-[43]' : 'z-30';
+  const onGoals = location.pathname === '/';
+
   return (
     <div
-      className={cn(
-        'fixed left-0 right-0 bg-card/90 backdrop-blur-xl border-t border-border',
-        highlightTab || tabTourBlocking ? 'z-[50]' : fabTutorialSpotlight ? 'z-[43]' : 'z-30',
-      )}
+      className={cn('fixed left-0 right-0 flex flex-col pointer-events-none', zChrome)}
       style={{ bottom: 'env(safe-area-inset-bottom)' }}
     >
-      <div
-        data-bottom-nav-inner="true"
-        className={cn(
-          'flex items-center px-2 py-3 max-w-lg mx-auto gap-1',
-          tabTourBlocking && 'pointer-events-none',
-        )}
-      >
-        <div className="relative flex flex-1 min-w-0 justify-around items-center">
-          {fabTutorialSpotlight ? (
-            <div
-              className="absolute inset-0 z-[1] rounded-2xl bg-background/55 backdrop-blur-md pointer-events-auto"
-              aria-hidden
-            />
-          ) : null}
-          {navItems.map(item => {
-            const isActive = location.pathname === item.to;
-            const isHi = highlightTab === item.key;
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                onMouseEnter={() => warm(item.to)}
-                onFocus={() => warm(item.to)}
-                onTouchStart={() => warm(item.to)}
-                className={cn(
-                  'relative z-[2] flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-shadow',
-                  fabTutorialSpotlight && 'pointer-events-none opacity-40 blur-[1px]',
-                  isHi && 'ring-2 ring-primary ring-offset-2 ring-offset-card z-[3]',
-                )}
-              >
-                <item.icon className={`w-5 h-5 transition-colors ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
-                <span className={`text-xs font-medium transition-colors ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
-                  {item.label}
-                </span>
-              </NavLink>
-            );
-          })}
+      {onGoals ? (
+        <div className="pointer-events-none flex justify-end max-w-lg mx-auto w-full px-2 pb-2">
+          <button
+            type="button"
+            onClick={onCreateGoal}
+            data-create-goal-fab="true"
+            className={cn(
+              'pointer-events-auto relative z-[4] shrink-0 w-12 h-12 rounded-2xl bg-primary flex items-center justify-center glow-primary -translate-y-1',
+              fabTutorialSpotlight && 'shadow-lg shadow-primary/30',
+            )}
+          >
+            <Plus className="w-6 h-6 text-primary-foreground" />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onCreateGoal}
-          data-create-goal-fab="true"
+      ) : null}
+      <div className="pointer-events-auto bg-card/90 backdrop-blur-xl border-t border-border w-full">
+        <div
+          data-bottom-nav-inner="true"
           className={cn(
-            'relative z-[4] shrink-0 w-12 h-12 rounded-2xl bg-primary flex items-center justify-center glow-primary',
-            fabTutorialSpotlight && 'shadow-lg shadow-primary/30',
+            'flex items-center px-2 py-3 max-w-lg mx-auto',
+            tabTourBlocking && 'pointer-events-none',
           )}
         >
-          <Plus className="w-6 h-6 text-primary-foreground" />
-        </button>
+          <div className="relative flex flex-1 min-w-0 justify-around items-center">
+            {fabTutorialSpotlight ? (
+              <div
+                className="absolute inset-0 z-[1] rounded-2xl bg-background/55 backdrop-blur-md pointer-events-auto"
+                aria-hidden
+              />
+            ) : null}
+            {navItems.map(item => {
+              const isActive = location.pathname === item.to;
+              const isHi = highlightTab === item.key;
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  onMouseEnter={() => warm(item.to)}
+                  onFocus={() => warm(item.to)}
+                  onTouchStart={() => warm(item.to)}
+                  className={cn(
+                    'relative z-[2] flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-shadow',
+                    fabTutorialSpotlight && 'pointer-events-none opacity-40 blur-[1px]',
+                    isHi && 'ring-2 ring-primary ring-offset-2 ring-offset-card z-[3]',
+                  )}
+                >
+                  <item.icon className={`w-5 h-5 transition-colors ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+                  <span className={`text-xs font-medium transition-colors ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
+                    {item.label}
+                  </span>
+                </NavLink>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );

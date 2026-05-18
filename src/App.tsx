@@ -87,6 +87,23 @@ function RouteLoadingScreen() {
   );
 }
 
+const ROUTE_LOADING_BLANK_MS = 200;
+
+/** Blank briefly so fast navigations never flash the skeleton; then skeleton if chunk still loading. */
+function DelayedRouteFallback() {
+  const [showSkeleton, setShowSkeleton] = useState(false);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setShowSkeleton(true), ROUTE_LOADING_BLANK_MS);
+    return () => window.clearTimeout(id);
+  }, []);
+
+  if (!showSkeleton) {
+    return <div className="min-h-[calc(100vh-5rem)] bg-background" aria-hidden />;
+  }
+  return <RouteLoadingScreen />;
+}
+
 const SESSION_SPLASH_KEY = 'owe_it_session_logo_splash_seen_v1';
 
 function AppRoutes() {
@@ -230,7 +247,7 @@ function LoggedInAppShell({
         aria-hidden={hideAppBehindWelcome || undefined}
         className={hideAppBehindWelcome ? 'pointer-events-none select-none opacity-0' : undefined}
       >
-        <Suspense fallback={<RouteLoadingScreen />}>
+        <Suspense fallback={<DelayedRouteFallback />}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/pulse" element={<Pulse />} />

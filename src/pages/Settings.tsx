@@ -315,10 +315,13 @@ export default function Settings() {
   useEffect(() => {
     if (!transactionCurrencies.includes(currency)) {
       setCurrency(transactionCurrencies[0]);
-      return;
     }
-    setCurrencySearch(formatStakeCurrencyLabel(currency));
   }, [currency, transactionCurrencies, setCurrency]);
+
+  const openCurrencyPicker = () => {
+    setCurrencyPickerOpen(true);
+    setCurrencySearch('');
+  };
 
   const filteredCurrencies = useMemo(() => {
     const q = currencySearch.trim().toLowerCase();
@@ -334,7 +337,6 @@ export default function Settings() {
       if (!currencyPickerRef.current) return;
       if (!currencyPickerRef.current.contains(event.target as Node)) {
         setCurrencyPickerOpen(false);
-        setCurrencySearch(formatStakeCurrencyLabel(currency));
       }
     };
     window.addEventListener('mousedown', onPointerDown);
@@ -547,20 +549,24 @@ export default function Settings() {
             </p>
           </div>
           <div ref={currencyPickerRef} className="relative">
-            <input
-              type="text"
-              value={currencySearch}
-              onFocus={() => {
-                setCurrencyPickerOpen(true);
-                setCurrencySearch('');
-              }}
-              onChange={(e) => {
-                setCurrencySearch(e.target.value);
-                setCurrencyPickerOpen(true);
-              }}
-              placeholder="Search currency..."
-              className="w-full bg-muted rounded-xl px-3 py-2 text-sm text-foreground border border-border focus:outline-none focus:ring-2 focus:ring-primary"
-            />
+            {currencyPickerOpen ? (
+              <input
+                type="text"
+                autoFocus
+                value={currencySearch}
+                onChange={(e) => setCurrencySearch(e.target.value)}
+                placeholder="Search currency..."
+                className="w-full bg-muted rounded-xl px-3 py-2 text-sm text-foreground border border-border focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={openCurrencyPicker}
+                className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted/80 focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                {formatStakeCurrencyLabel(currency)}
+              </button>
+            )}
             {currencyPickerOpen && (
               <div className="absolute z-20 mt-2 w-full max-h-56 overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
                 {filteredCurrencies.length === 0 ? (
@@ -573,7 +579,6 @@ export default function Settings() {
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
                         setCurrency(code as StakeCurrency);
-                        setCurrencySearch(formatStakeCurrencyLabel(code as StakeCurrency));
                         setCurrencyPickerOpen(false);
                       }}
                       className={`w-full text-left px-3 py-2 text-sm transition-colors ${

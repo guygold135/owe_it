@@ -12,7 +12,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { CircleHelp, Copy, History, MessageSquare, Settings, User } from "lucide-react";
+import { CircleHelp, History, MessageSquare, Settings, User } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { PopoverClose } from "@/components/ui/popover";
@@ -27,8 +27,6 @@ export default function UserProfilePopover() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { profileMenuTutorial } = useAppTutorial();
-  const [friendCode, setFriendCode] = useState<string | null>(null);
-  const [friendCodeDbReady, setFriendCodeDbReady] = useState<boolean>(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -46,71 +44,18 @@ export default function UserProfilePopover() {
       return;
     }
 
-    const generateLocalFriendCode = () => {
-      let s = "";
-      for (let i = 0; i < 11; i += 1) s += Math.floor(Math.random() * 10).toString();
-      return s;
-    };
-
-    const localKey = `friend_code_${user.id}`;
-    const localExisting = window.localStorage.getItem(localKey);
-    const localCandidate =
-      localExisting && /^\d{11}$/.test(localExisting) ? localExisting : generateLocalFriendCode();
-    window.localStorage.setItem(localKey, localCandidate);
-    setFriendCode((prev) => prev ?? localCandidate);
-
-    (async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("friend_code, avatar_url")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (error) {
-        const msg = String("message" in error ? error.message : "").toLowerCase();
-        if (msg.includes("friend_code") && (msg.includes("column") || msg.includes("schema") || msg.includes("does not exist"))) {
-          setFriendCodeDbReady(false);
-        }
-        return;
-      }
-      const row = data as { friend_code?: string | null; avatar_url?: string | null } | null;
-      const nextAvatar = row?.avatar_url?.trim() || null;
-      setAvatarUrl(nextAvatar);
-      writeProfileAvatarToStorage(user.id, nextAvatar);
-      const existing = row?.friend_code ?? null;
-      if (existing) {
-        setFriendCode(existing);
-        window.localStorage.setItem(localKey, existing);
-        return;
-      }
-
-      // Best-effort persist if missing (handles first-run when migration is applied)
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        const candidate = generateLocalFriendCode();
-        const { data: updated, error: updateError } = await supabase
-          .from("profiles")
-          .update({ friend_code: candidate })
-          .eq("id", user.id)
-          .select("friend_code")
-          .maybeSingle();
-
-        if (!updateError) {
-          const saved = (updated as { friend_code?: string | null } | null)?.friend_code ?? null;
-          if (saved) {
-            setFriendCode(saved);
-            window.localStorage.setItem(localKey, saved);
-          }
-          break;
-        }
-        const umsg = String("message" in updateError ? updateError.message : "").toLowerCase();
-        if (umsg.includes("friend_code") && (umsg.includes("column") || umsg.includes("schema") || umsg.includes("does not exist"))) {
-          setFriendCodeDbReady(false);
-          break;
-        }
-        const msg = String(updateError.message || "").toLowerCase();
-        if (!msg.includes("duplicate") && !msg.includes("unique")) break;
-      }
-    })();
+    void supabase
+      .from("profiles")
+      .select("avatar_url")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error) return;
+        const row = data as { avatar_url?: string | null } | null;
+        const nextAvatar = row?.avatar_url?.trim() || null;
+        setAvatarUrl(nextAvatar);
+        writeProfileAvatarToStorage(user.id, nextAvatar);
+      });
   }, [user?.id]);
 
   useEffect(() => {
@@ -166,10 +111,14 @@ export default function UserProfilePopover() {
           </Avatar>
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-62">
-        <PopoverHeader>
-          <div className="flex items-center space-x-3">
-            <Avatar className="h-14 w-14 rounded-full">
+      <PopoverContent
+        align="end"
+        sideOffset={8}
+        className="w-52 max-w-[min(13rem,calc(100vw-1.5rem))] overflow-hidden p-0"
+      >
+        <PopoverHeader className="px-2.5 py-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Avatar className="h-10 w-10 shrink-0 rounded-full">
               <AvatarImage
                 src={displayAvatarSrc}
                 alt={displayName}
@@ -181,55 +130,19 @@ export default function UserProfilePopover() {
                 {initial}
               </AvatarFallback>
             </Avatar>
-            <div>
-              <PopoverTitle>{displayName}</PopoverTitle>
-              <PopoverDescription className="text-xs">
+            <div className="min-w-0 flex-1">
+              <PopoverTitle className="truncate text-sm leading-tight">{displayName}</PopoverTitle>
+              <PopoverDescription className="truncate text-xs">
                 {email}
-              </PopoverDescription>
-              <PopoverDescription className="text-xs flex items-center gap-2">
-                <span className="tabular-nums">
-                  your account id {friendCodeDbReady ? (friendCode ?? "…") : "unavailable"}
-                </span>
-                <button
-                  type="button"
-                  className="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                  aria-label="Copy Account ID"
-                  onClick={async () => {
-                    if (!friendCodeDbReady || !friendCode) return;
-                    try {
-                      if (navigator.clipboard?.writeText) {
-                        await navigator.clipboard.writeText(friendCode);
-                        return;
-                      }
-                    } catch (e) {
-                      console.error("Clipboard error", e);
-                    }
-                    try {
-                      const ta = document.createElement("textarea");
-                      ta.value = friendCode;
-                      ta.style.position = "fixed";
-                      ta.style.left = "-9999px";
-                      document.body.appendChild(ta);
-                      ta.focus();
-                      ta.select();
-                      document.execCommand("copy");
-                      document.body.removeChild(ta);
-                    } catch (e) {
-                      console.error("Clipboard fallback error", e);
-                    }
-                  }}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
               </PopoverDescription>
             </div>
           </div>
         </PopoverHeader>
-        <PopoverBody className="space-y-1 px-2 py-1">
+        <PopoverBody className="space-y-0.5 p-2">
           <PopoverClose asChild>
             <Button
               variant="ghost"
-              className="w-full justify-start"
+              className="h-8 w-full justify-start px-2 text-sm"
               size="sm"
               onClick={() => navigate("/profile")}
             >
@@ -240,7 +153,7 @@ export default function UserProfilePopover() {
           <PopoverClose asChild>
             <Button
               variant="ghost"
-              className="w-full justify-start"
+              className="h-8 w-full justify-start px-2 text-sm"
               size="sm"
               onClick={() => navigate("/history")}
             >
@@ -251,7 +164,7 @@ export default function UserProfilePopover() {
           <PopoverClose asChild>
             <Button
               variant="ghost"
-              className="w-full justify-start"
+              className="h-8 w-full justify-start px-2 text-sm"
               size="sm"
               onClick={() => navigate("/feedback")}
             >
@@ -262,7 +175,7 @@ export default function UserProfilePopover() {
           <PopoverClose asChild>
             <Button
               variant="ghost"
-              className="w-full justify-start"
+              className="h-8 w-full justify-start px-2 text-sm"
               size="sm"
               onClick={() => navigate("/help")}
             >
@@ -273,7 +186,7 @@ export default function UserProfilePopover() {
           <PopoverClose asChild>
             <Button
               variant="ghost"
-              className="w-full justify-start"
+              className="h-8 w-full justify-start px-2 text-sm"
               size="sm"
               onClick={() => navigate("/settings")}
             >
@@ -286,4 +199,3 @@ export default function UserProfilePopover() {
     </Popover>
   );
 }
-

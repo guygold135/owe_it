@@ -70,6 +70,24 @@ This file tracks secret **names only**. Never put real values in this repo.
 - `CORS_ALLOWED_ORIGINS`
   - Used in: shared CORS helper
   - Needed by: function CORS controls
+- `BRAINTREE_MERCHANT_ID`
+  - Used in: Braintree edge functions
+  - Needed by: vault, client token, charges
+- `BRAINTREE_PUBLIC_KEY`
+  - Used in: Braintree edge functions
+  - Needed by: API auth (server only)
+- `BRAINTREE_PRIVATE_KEY`
+  - Used in: Braintree edge functions
+  - Needed by: vault and charges (never put in Vercel / frontend)
+- `BRAINTREE_ENVIRONMENT`
+  - Used in: Braintree edge functions
+  - Needed by: `sandbox` or `production`
+- `BRAINTREE_MERCHANT_ACCOUNT_ID`
+  - Used in: Braintree charges
+  - Needed by: default merchant account
+- `BRAINTREE_MERCHANT_ACCOUNT_USD` (and other currencies if used)
+  - Used in: Braintree charges per currency
+  - Needed by: multi-currency live charges
 
 ## Backup/Recovery Secrets (local machine + scheduler)
 
@@ -82,6 +100,7 @@ This file tracks secret **names only**. Never put real values in this repo.
 
 - Last DB password rotation:
 - Last Stripe key rotation:
+- Last Braintree key rotation:
 - Last Supabase service role key rotation:
 - Last webhook secret rotation:
 - Last Sentry DSN review:

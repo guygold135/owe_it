@@ -16,7 +16,81 @@
       }
       #root {
         min-height: 100%;
+        min-height: 100dvh;
         background: hsl(220 20% 14%);
+      }
+      /* Mirrors BootstrapLogoScreen — paints before JS so the logo + bar appear immediately. */
+      #boot-splash {
+        min-height: 100%;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        padding: 1.5rem;
+        box-sizing: border-box;
+      }
+      #boot-splash img {
+        display: block;
+        width: 9rem;
+        height: 9rem;
+        object-fit: contain;
+        filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.08));
+        user-select: none;
+      }
+      @media (min-width: 640px) {
+        #boot-splash img {
+          width: 11rem;
+          height: 11rem;
+        }
+      }
+      #boot-splash .loading-track {
+        width: 9rem;
+        height: 0.36rem;
+        border-radius: 999px;
+        background: hsl(220 10% 25% / 0.45);
+        overflow: hidden;
+        position: relative;
+        box-shadow: inset 0 0 0 1px hsl(220 15% 30% / 0.45);
+      }
+      #boot-splash .loading-bar {
+        position: absolute;
+        inset: 0;
+        width: 46%;
+        border-radius: 999px;
+        background: linear-gradient(
+          90deg,
+          hsl(145 80% 55% / 0.2),
+          hsl(145 80% 55% / 0.92) 45%,
+          hsl(145 80% 55% / 0.35)
+        );
+        animation: loading-slide 1.35s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        will-change: transform;
+      }
+      #boot-splash .boot-loading-label {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        font-size: 0.75rem;
+        font-weight: 500;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: hsl(220 8% 55% / 0.6);
+      }
+      @keyframes loading-slide {
+        from {
+          transform: translate3d(-120%, 0, 0);
+        }
+        to {
+          transform: translate3d(260%, 0, 0);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot-splash .loading-bar {
+          animation: none;
+          width: 65%;
+          transform: translateX(18%);
+        }
       }
     </style>
     <link rel="preload" as="image" href="/app-logo.svg?v=__DEPLOY_REF__" fetchpriority="high" />
@@ -37,7 +111,23 @@
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="boot-splash" aria-busy="true" aria-live="polite">
+        <img
+          src="/app-logo.svg?v=__DEPLOY_REF__"
+          alt=""
+          aria-hidden="true"
+          width="176"
+          height="176"
+          decoding="sync"
+          fetchpriority="high"
+        />
+        <div class="loading-track" aria-hidden="true">
+          <div class="loading-bar"></div>
+        </div>
+        <p class="boot-loading-label">Loading</p>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

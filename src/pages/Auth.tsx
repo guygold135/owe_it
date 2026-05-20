@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -262,7 +263,7 @@ export default function Auth() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-background px-6 py-10">
+    <div className="relative min-h-screen overflow-hidden bg-transparent px-6 py-10">
       <SmokeBackground smokeColor="#30e07a" />
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-sm flex-col items-center justify-center">
         {/* Logo & Tagline */}
@@ -450,7 +451,18 @@ export default function Auth() {
           </Button>
         </div>
 
-        <p className="text-center text-xs text-muted-foreground mt-8">
+        <p className="text-center text-xs text-muted-foreground mt-6">
+          By creating an account, you agree to our{' '}
+          <Link to="/terms" className="underline underline-offset-2 hover:text-foreground">
+            Terms of Service
+          </Link>{' '}
+          and{' '}
+          <Link to="/privacy" className="underline underline-offset-2 hover:text-foreground">
+            Privacy Policy
+          </Link>
+        </p>
+
+        <p className="text-center text-xs text-muted-foreground mt-4">
           {mode === 'signin'
             ? "Don't have an account? "
             : 'Already have an account? '}

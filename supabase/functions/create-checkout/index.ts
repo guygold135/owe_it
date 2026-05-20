@@ -9,7 +9,7 @@ import {
 } from "../_shared/stripe-money.ts";
 import { DEFAULT_CHARITY_ID, isValidCharityId } from "../_shared/charities.ts";
 import { buildCorsHeaders } from "../_shared/cors.ts";
-import { isBraintreeConfigured } from "../_shared/braintree.ts";
+import { assertPaymentMethodBelongsToUser, isBraintreeConfigured } from "../_shared/braintree.ts";
 
 const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -41,15 +41,11 @@ async function getAuthenticatedUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ") || !supabaseUrl) return null;
   const token = authHeader.slice(7);
-  const keysToTry = [supabaseAnonKey, supabaseServiceKey].filter(
-    (key): key is string => typeof key === "string" && key.length > 0,
-  );
-  for (const key of keysToTry) {
-    const authClient = createClient(supabaseUrl, key);
-    const { data: { user }, error } = await authClient.auth.getUser(token);
-    if (!error && user?.id) return user.id;
-  }
-  return null;
+  if (!supabaseAnonKey) return null;
+  const authClient = createClient(supabaseUrl, supabaseAnonKey);
+  const { data: { user }, error } = await authClient.auth.getUser(token);
+  if (error || !user?.id) return null;
+  return user.id;
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -70,14 +66,6 @@ serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    if (!stripeSecret) {
-      return jsonResponse(
-        { error: "Stripe secret key not configured" },
-          corsHeaders,
-        500
-      );
-    }
-
     const body = await req.json();
 
     // Braintree flow: token is vaulted first, then attached to goal for delayed charge.
@@ -126,6 +114,16 @@ serve(async (req: Request): Promise<Response> => {
       if (userId !== authUserId) {
         return jsonResponse({ error: "Forbidden" }, corsHeaders, 403);
       }
+      if (typeof braintreeCustomerId !== "string" || braintreeCustomerId !== authUserId) {
+        return jsonResponse({ error: "Invalid Braintree customer for this account" }, corsHeaders, 400);
+      }
+
+      try {
+        await assertPaymentMethodBelongsToUser(braintreePaymentMethodToken, authUserId);
+      } catch (tokenErr: unknown) {
+        const message = tokenErr instanceof Error ? tokenErr.message : "Invalid payment method";
+        return jsonResponse({ error: message }, corsHeaders, 400);
+      }
 
       const normalizedCurrency = normalizeStakeCurrencyShared(currency);
       const charityId =
@@ -167,8 +165,7 @@ serve(async (req: Request): Promise<Response> => {
           is_private: !!isPrivate,
           charity_id: charityId,
           payment_provider: "braintree",
-          braintree_customer_id:
-            typeof braintreeCustomerId === "string" && braintreeCustomerId ? braintreeCustomerId : null,
+          braintree_customer_id: authUserId,
           braintree_payment_method_token: braintreePaymentMethodToken,
           payment_status: "stored_for_later_capture",
         })
@@ -184,6 +181,10 @@ serve(async (req: Request): Promise<Response> => {
       }
 
       return jsonResponse({ success: true, goalId: goal.id }, corsHeaders);
+    }
+
+    if (!stripeSecret) {
+      return jsonResponse({ error: "Stripe secret key not configured" }, corsHeaders, 500);
     }
 
     // In-app flow: store payment method now, charge only on failed/expired outcome.

@@ -37,7 +37,7 @@ serve(async (req: Request): Promise<Response> => {
     const authUserId = await getAuthenticatedUserId(req);
     if (!authUserId) return jsonResponse({ error: "Unauthorized" }, corsHeaders, 401);
 
-    const clientToken = await generateClientToken();
+    const clientToken = await generateClientToken(authUserId);
     return jsonResponse({ clientToken }, corsHeaders);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";

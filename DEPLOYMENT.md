@@ -101,13 +101,18 @@ Recommended redirect URLs include:
 
 Deploy these functions:
 - `create-checkout`
+- `create-braintree-client-token`
+- `vault-braintree-payment-method`
 - `resolve-goal-direct`
 - `resolve-goal`
 - `settle-expired-goal-payments`
+- `retry-failed-goal-payment`
 - `stripe-webhook`
 - `submit-feedback`
 - `admin-feedback`
 - `delete-account`
+
+Do **not** deploy `debug-trigger-payment-failed-alert` to production.
 
 ### 3.1 Set function secrets
 
@@ -126,6 +131,17 @@ supabase secrets set RESEND_API_KEY=re_...
 supabase secrets set FEEDBACK_TO_EMAIL=feedback@yourdomain.com
 supabase secrets set FEEDBACK_FROM_EMAIL=feedback@yourdomain.com
 supabase secrets set CORS_ALLOWED_ORIGINS=https://oweit.site,https://www.oweit.site,http://localhost:8080,http://localhost:5173
+supabase secrets set BRAINTREE_MERCHANT_ID=YOUR_MERCHANT_ID
+supabase secrets set BRAINTREE_PUBLIC_KEY=YOUR_PUBLIC_KEY
+supabase secrets set BRAINTREE_PRIVATE_KEY=YOUR_PRIVATE_KEY
+supabase secrets set BRAINTREE_ENVIRONMENT=production
+supabase secrets set BRAINTREE_MERCHANT_ACCOUNT_ID=YOUR_DEFAULT_MERCHANT_ACCOUNT_ID
+```
+
+For each currency you charge (example USD):
+
+```bash
+supabase secrets set BRAINTREE_MERCHANT_ACCOUNT_USD=YOUR_USD_MERCHANT_ACCOUNT_ID
 ```
 
 Tip: use a long random value for `AUTO_EXPIRE_CRON_SECRET` (at least 32 chars).
@@ -134,7 +150,10 @@ Tip: set `CORS_ALLOWED_ORIGINS` to a comma-separated list of trusted web app ori
 ### 3.2 Deploy functions
 
 ```bash
+supabase db push
 supabase functions deploy create-checkout
+supabase functions deploy create-braintree-client-token
+supabase functions deploy vault-braintree-payment-method
 supabase functions deploy resolve-goal-direct
 supabase functions deploy resolve-goal
 supabase functions deploy settle-expired-goal-payments
@@ -142,6 +161,7 @@ supabase functions deploy stripe-webhook
 supabase functions deploy submit-feedback
 supabase functions deploy admin-feedback
 supabase functions deploy delete-account
+supabase functions deploy retry-failed-goal-payment
 supabase functions deploy settlement-health
 ```
 

@@ -46,6 +46,19 @@ export async function generateClientToken(customerId?: string): Promise<string> 
   return response.clientToken;
 }
 
+/** Ensures a vaulted token belongs to the app user (Braintree customer id = Supabase user id). */
+export async function assertPaymentMethodBelongsToUser(
+  paymentMethodToken: string,
+  appUserId: string,
+): Promise<void> {
+  const gateway = getBraintreeGateway();
+  const paymentMethod = await gateway.paymentMethod.find(paymentMethodToken);
+  const customerId = (paymentMethod as { customerId?: string }).customerId;
+  if (!customerId || customerId !== appUserId) {
+    throw new Error("Payment method does not belong to this account");
+  }
+}
+
 export async function upsertVaultedPaymentMethod(args: {
   appUserId: string;
   paymentMethodNonce: string;

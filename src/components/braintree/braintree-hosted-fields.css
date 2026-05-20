@@ -1,0 +1,29 @@
+/* One mount node per field — Braintree injects iframe here */
+.braintree-hf-field {
+  display: flex;
+  align-items: center;
+  transition: box-shadow 0.15s ease;
+}
+
+/* Iframe focus does not bubble :focus-within — Braintree toggles this class */
+.owe-braintree-hosted .braintree-hf-field.braintree-hosted-fields-focused {
+  box-shadow: 0 0 0 2px hsl(var(--primary)) !important;
+}
+
+.braintree-hf-field iframe {
+  display: block !important;
+  width: 100% !important;
+  height: 1.5rem !important;
+  min-height: 1.5rem !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.braintree-hf-field .braintree-hosted-field {
+  width: 100% !important;
+  height: 1.5rem !important;
+  background: transparent !important;
+}

@@ -40,6 +40,8 @@ const Profile = lazy(() => import("./pages/Profile"));
 const Help = lazy(() => import("./pages/Help"));
 const FeedbackRouter = lazy(() => import("./pages/FeedbackRouter"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const Terms = lazy(() => import("./pages/Terms"));
+const Privacy = lazy(() => import("./pages/Privacy"));
 const CreateGoalSheet = lazy(() =>
   import("@/components/CreateGoalSheet").then((mod) => ({ default: mod.CreateGoalSheet })),
 );
@@ -136,27 +138,23 @@ function AppRoutes() {
     return !appReadyForRouting && !splashMaxElapsed; // Keep up to 3s while app is still loading.
   }, [showSessionSplash, splashMinElapsed, appReadyForRouting, splashMaxElapsed]);
 
-  if (shouldShowLogoSplash) {
-    return <BootstrapLogoScreen />;
-  }
-
-  // Session splash is one-time per tab; still show the branded logo (not a spinner) while auth resolves.
-  if (loading) {
-    return <BootstrapLogoScreen />;
-  }
-
-  if (passwordRecoveryPending && !user) {
+  // Logo + loading bar on first paint whenever auth/bootstrap is not ready (matches index.html #boot-splash).
+  if (shouldShowLogoSplash || !appReadyForRouting) {
     return <BootstrapLogoScreen />;
   }
 
   if (!user) {
     return (
-      <Suspense fallback={<BootstrapLogoScreen />}>
-        <Routes>
-          <Route path="/auth" element={<Auth />} />
-          <Route path="*" element={<Navigate to="/auth" replace />} />
-        </Routes>
-      </Suspense>
+      <div className="max-w-lg mx-auto relative min-h-screen flex flex-col">
+        <Suspense fallback={<BootstrapLogoScreen />}>
+          <Routes>
+            <Route path="/auth" element={<Auth />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="*" element={<Navigate to="/auth" replace />} />
+          </Routes>
+        </Suspense>
+      </div>
     );
   }
 
@@ -228,12 +226,12 @@ function LoggedInAppShell({
     };
   }, [showShellSplash]);
 
+  const shellStillLoading = isFetching > 0;
   const shouldShowShellSplash = useMemo(() => {
     if (!showShellSplash) return false;
     if (!shellSplashMinElapsed) return true; // Always show for first second.
-    const shellStillLoading = isFetching > 0;
     return shellStillLoading && !shellSplashMaxElapsed; // Keep up to 3s while first shell data is loading.
-  }, [showShellSplash, shellSplashMinElapsed, shellSplashMaxElapsed, isFetching]);
+  }, [showShellSplash, shellSplashMinElapsed, shellSplashMaxElapsed, shellStillLoading]);
 
   if (shouldShowShellSplash) {
     return <BootstrapLogoScreen />;
@@ -257,6 +255,8 @@ function LoggedInAppShell({
             <Route path="/settings" element={<Settings />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/help" element={<Help />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/privacy" element={<Privacy />} />
             <Route path="/feedback" element={<FeedbackRouter />} />
             <Route path="/admin-feedback" element={<Navigate to="/feedback" replace />} />
             <Route path="/auth" element={<Navigate to="/" replace />} />

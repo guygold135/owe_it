@@ -5,7 +5,7 @@ import { APP_TUTORIAL_SHEET_STEP_TO_PHASE, isAppTutorialSheetPhase } from '@/lib
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar, Heart, UserPlus } from 'lucide-react';
-import type { Dropin } from 'braintree-web-drop-in-react';
+import type { BraintreePaymentInstance } from '@/components/braintree/braintreePayment';
 import { useGoals } from '@/hooks/useGoals';
 import { useAuth } from '@/hooks/useAuth';
 import { Goal, Judge, Friend } from '@/lib/types';
@@ -50,6 +50,7 @@ import {
   toDatetimeLocalString,
 } from '@/components/create-goal-sheet/helpers';
 import { CardStepContinueButton, CardStepFields } from '@/components/create-goal-sheet/CardStep';
+import { PaymentMethodConsentNotice } from '@/components/PaymentMethodConsentNotice';
 
 type CloseConfirmKind = 'judge-wait' | 'card' | 'sign' | 'tutorial-exit';
 
@@ -173,8 +174,10 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const [isPrivate, setIsPrivate] = useState(false);
   const [braintreePaymentMethodToken, setBraintreePaymentMethodToken] = useState<string | null>(null);
   const [braintreeCustomerId, setBraintreeCustomerId] = useState<string | null>(null);
-  const [braintreeDropinInstance, setBraintreeDropinInstance] = useState<Dropin | null>(null);
+  const [braintreeDropinInstance, setBraintreeDropinInstance] = useState<BraintreePaymentInstance | null>(null);
+  const [cardFieldsComplete, setCardFieldsComplete] = useState(false);
   const [cardStepSubmitting, setCardStepSubmitting] = useState(false);
+  const [paymentMethodConsent, setPaymentMethodConsent] = useState(false);
   const [customStakeError, setCustomStakeError] = useState(false);
   const [customStakeInput, setCustomStakeInput] = useState('');
   const [selectedCharityId, setSelectedCharityId] = useState(DEFAULT_CHARITY_ID);
@@ -295,6 +298,18 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     () => buildPresetStakesForCurrency(stakeCurrency),
     [stakeCurrency],
   );
+
+  /** Stake shown on card step — includes custom amount even if step 1 Continue was pressed before blur. */
+  const cardStepStakeMajor = useMemo(() => {
+    const raw = customStakeInput.trim();
+    if (raw !== '') {
+      const num = Number(raw);
+      if (Number.isFinite(num) && num > 0) {
+        return roundStakeMajor(num, stakeCurrency);
+      }
+    }
+    return stake;
+  }, [stake, customStakeInput, stakeCurrency]);
 
   const loadFriends = useCallback(async () => {
     if (!user?.id) return;
@@ -592,7 +607,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     setStep(0); setTitle(''); setDescription(''); setStake(0);
     setDeadline(''); setJudge(null); setIsPrivate(false);
     setBraintreePaymentMethodToken(null); setBraintreeCustomerId(null); setBraintreeDropinInstance(null);
+    setCardFieldsComplete(false);
     setCardStepSubmitting(false);
+    setPaymentMethodConsent(false);
     setCustomStakeInput(''); setCustomStakeError(false);
     setSelectedCharityId(DEFAULT_CHARITY_ID);
     setJudgeRequestId(null); setWaitingJudgeName(null);
@@ -697,6 +714,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       }
     }
     if (step === 1) {
+      let resolvedStake = stake;
       const raw = customStakeInput.trim();
       if (raw !== '') {
         const num = Number(raw);
@@ -705,8 +723,17 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
           return;
         }
         setCustomStakeError(false);
+        resolvedStake = num === 0 ? 0 : roundStakeMajor(num, stakeCurrency);
+        setStake(resolvedStake);
+        setCustomStakeInput(
+          resolvedStake === 0
+            ? ''
+            : resolvedStake === Math.floor(resolvedStake)
+              ? String(resolvedStake)
+              : resolvedStake.toFixed(2),
+        );
       }
-      registerStakeChoice(stake > 0);
+      registerStakeChoice(resolvedStake > 0);
       // After stake, always choose judge next
       setStep(2);
       return;
@@ -1057,7 +1084,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                   {step === 0 && 'Define Your Goal'}
                   {step === 1 && 'Set Your Stake'}
                   {step === 2 && 'Choose Your Judge'}
-                  {step === 3 && 'Card details'}
+                  {step === 3 && 'Secure payment'}
                   {step === 4 && 'Sign the Contract'}
                 </h2>
                 {!sheetCloseLocked ? (
@@ -1575,17 +1602,25 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               {step === 3 && !tutorialCreateFlowActive && (
                 <div className="relative flex flex-col flex-1 min-h-0">
                   {cardStepSubmitting && (
-                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-2xl bg-background px-6">
-                      <div className="h-7 w-7 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
-                      <p className="text-sm text-muted-foreground">Loading secure card form…</p>
+                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-2xl bg-background/95 px-6 backdrop-blur-[2px]">
+                      <div className="h-7 w-7 animate-spin rounded-full border-2 border-primary/30 border-t-primary" aria-hidden />
+                      <p className="text-sm text-muted-foreground">Saving your card securely…</p>
                     </div>
                   )}
                   <CardStepFields
-                    stake={stake}
+                    stake={cardStepStakeMajor}
                     stakeCurrency={stakeCurrency}
                     onDropinReady={setBraintreeDropinInstance}
+                    onCardFieldsCompleteChange={setCardFieldsComplete}
                     hideContent={cardStepSubmitting}
                   />
+                  {!cardStepSubmitting && braintreeDropinInstance && (
+                    <PaymentMethodConsentNotice
+                      className="mt-4"
+                      checked={paymentMethodConsent}
+                      onCheckedChange={setPaymentMethodConsent}
+                    />
+                  )}
                   {!cardStepSubmitting && (
                     <div className="flex gap-3 mt-8">
                     <button
@@ -1597,6 +1632,8 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     </button>
                     <CardStepContinueButton
                       dropinInstance={braintreeDropinInstance}
+                      cardFieldsComplete={cardFieldsComplete}
+                      consentAccepted={paymentMethodConsent}
                       onSubmittingChange={setCardStepSubmitting}
                       onPaymentMethodReady={({ token, customerId }) => {
                         setBraintreePaymentMethodToken(token);

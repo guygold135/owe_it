@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
-import DropIn, { type Dropin } from 'braintree-web-drop-in-react';
-import { ChevronRight } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { ChevronRight, Lock, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatStakeAmount } from '@/lib/currency';
 import { supabase } from '@/integrations/supabase/client';
+import { BraintreeHostedCardForm } from '@/components/braintree/BraintreeHostedCardForm';
+import type { BraintreePaymentInstance } from '@/components/braintree/braintreePayment';
 
 async function getFreshAccessToken(): Promise<string> {
   const { error: userError } = await supabase.auth.getUser();
@@ -80,25 +81,43 @@ export function CardStepFields({
   stake,
   stakeCurrency,
   onDropinReady,
+  onCardFieldsCompleteChange,
   hideContent,
 }: {
   stake: number;
   stakeCurrency: string;
-  onDropinReady: (instance: Dropin | null) => void;
+  onDropinReady: (instance: BraintreePaymentInstance | null) => void;
+  onCardFieldsCompleteChange?: (complete: boolean) => void;
   hideContent?: boolean;
 }) {
   const [clientToken, setClientToken] = useState<string | null>(null);
   const [loadingToken, setLoadingToken] = useState(true);
   const [tokenError, setTokenError] = useState<string | null>(null);
-  const [mountDropin, setMountDropin] = useState(false);
-  const [dropinKey, setDropinKey] = useState(0);
-  const [dropinReady, setDropinReady] = useState(false);
+  const [formReady, setFormReady] = useState(false);
+  const [formKey, setFormKey] = useState(0);
+
+  const handleReady = useCallback(
+    (instance: BraintreePaymentInstance | null) => {
+      setFormReady(Boolean(instance));
+      if (!instance) onCardFieldsCompleteChange?.(false);
+      onDropinReady(instance);
+    },
+    [onDropinReady, onCardFieldsCompleteChange],
+  );
+
+  const handleFormError = useCallback((message: string) => {
+    setTokenError(message);
+    setFormReady(false);
+    onDropinReady(null);
+  }, [onDropinReady]);
 
   useEffect(() => {
     let cancelled = false;
     setLoadingToken(true);
     setTokenError(null);
+    setFormReady(false);
     onDropinReady(null);
+    onCardFieldsCompleteChange?.(false);
     void invokeWithFreshSession<{ clientToken?: unknown }>('create-braintree-client-token', {}).then(({ data, error }) => {
         if (error) {
           throw error;
@@ -121,147 +140,72 @@ export function CardStepFields({
     return () => {
       cancelled = true;
       onDropinReady(null);
+      onCardFieldsCompleteChange?.(false);
     };
-  }, [onDropinReady]);
+  }, [onDropinReady, onCardFieldsCompleteChange]);
 
-  useEffect(() => {
-    if (!clientToken) {
-      setMountDropin(false);
-      setDropinReady(false);
-      return;
-    }
-    setDropinReady(false);
-    const mountTimer = window.setTimeout(() => {
-      setMountDropin(true);
-      // Braintree iframes can get stuck inside animated containers until a reflow happens.
-      window.requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
-      window.setTimeout(() => window.dispatchEvent(new Event('resize')), 350);
-    }, 220);
-    return () => window.clearTimeout(mountTimer);
-  }, [clientToken, dropinKey]);
-
-  useEffect(() => {
-    if (!mountDropin || dropinReady) return;
-    const staleTimer = window.setTimeout(() => {
-      setDropinKey((k) => k + 1);
-    }, 6000);
-    return () => window.clearTimeout(staleTimer);
-  }, [mountDropin, dropinReady]);
+  const showLoading = loadingToken || (clientToken && !formReady);
 
   return (
-    <div className="relative space-y-3 flex-1 overflow-hidden rounded-2xl">
-      <style>{`
-        .braintree-dark .braintree-dropin,
-        .braintree-dark .braintree-dropin * {
-          color: hsl(var(--foreground)) !important;
-          border-color: hsl(var(--border)) !important;
-        }
-        .braintree-dark .braintree-dropin,
-        .braintree-dark .braintree-dropin .braintree-upper-container {
-          margin-top: 0 !important;
-          padding-top: 0 !important;
-        }
-        .braintree-dark .braintree-dropin .braintree-upper-container,
-        .braintree-dark .braintree-dropin .braintree-sheet__container,
-        .braintree-dark .braintree-dropin .braintree-sheet,
-        .braintree-dark .braintree-dropin .braintree-sheet__header,
-        .braintree-dark .braintree-dropin .braintree-sheet__content,
-        .braintree-dark .braintree-dropin .braintree-sheet__content--form {
-          background: hsl(var(--background)) !important;
-        }
-        .braintree-dark .braintree-dropin .braintree-upper-container,
-        .braintree-dark .braintree-dropin .braintree-sheet__container,
-        .braintree-dark .braintree-dropin .braintree-card,
-        .braintree-dark .braintree-dropin .braintree-sheet {
-          border-radius: 16px !important;
-          overflow: hidden !important;
-        }
-        .braintree-dark .braintree-dropin .braintree-upper-container,
-        .braintree-dark .braintree-dropin .braintree-sheet__container,
-        .braintree-dark .braintree-dropin .braintree-card {
-          margin: 0 !important;
-          padding: 0 !important;
-          border: 0 !important;
-          box-shadow: none !important;
-        }
-        .braintree-dark .braintree-dropin .braintree-lower-container,
-        .braintree-dark .braintree-dropin [data-braintree-id="lower-container"] {
-          display: none !important;
-        }
-        .braintree-dark .braintree-dropin .braintree-loader__container,
-        .braintree-dark .braintree-dropin [data-braintree-id="loading-container"] {
-          display: none !important;
-        }
-        .braintree-dark .braintree-dropin .braintree-form__field-group,
-        .braintree-dark .braintree-dropin .braintree-form__field {
-          background: hsl(var(--muted) / 0.45) !important;
-          border-radius: 12px !important;
-        }
-        .braintree-dark .braintree-dropin .braintree-sheet__content--form {
-          background: hsl(var(--muted)) !important;
-        }
-        .braintree-dark .braintree-dropin .braintree-form__field-group,
-        .braintree-dark .braintree-dropin .braintree-form__field-group:focus-within,
-        .braintree-dark .braintree-dropin [data-braintree-id="cardholder-name-field-group"],
-        .braintree-dark .braintree-dropin [data-braintree-id="number-field-group"],
-        .braintree-dark .braintree-dropin [data-braintree-id="expiration-date-field-group"] {
-          background: hsl(var(--muted)) !important;
-          border: 0 !important;
-          outline: 0 !important;
-          box-shadow: none !important;
-        }
-        .braintree-dark .braintree-dropin .braintree-form__flexible-fields,
-        .braintree-dark .braintree-dropin .braintree-form__flexible-field {
-          background: transparent !important;
-          border: 0 !important;
-          box-shadow: none !important;
-        }
-        .braintree-dark .braintree-dropin .braintree-placeholder,
-        .braintree-dark .braintree-dropin .braintree-form__label {
-          color: hsl(var(--muted-foreground)) !important;
-        }
-      `}</style>
-      {!hideContent && !(loadingToken || (clientToken && !dropinReady)) && (
-        <p className="text-sm text-muted-foreground">
-          <span className="font-semibold text-foreground">
-            Only your card will be charged {formatStakeAmount(stake, stakeCurrency)},
-          </span>{' '}
-          if you don&apos;t complete your goal by the deadline.
-        </p>
+    <div className="relative flex flex-1 min-h-0 flex-col gap-4">
+      {!hideContent && !showLoading && stake > 0 && (
+        <div className="shrink-0 overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-muted/50 via-muted/25 to-transparent p-4">
+          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+            Stake on the line
+          </p>
+          <div className="mt-1 flex items-center gap-3">
+            <ShieldCheck className="h-8 w-8 shrink-0 text-primary" aria-hidden />
+            <p className="font-display text-3xl font-extrabold tabular-nums text-primary">
+              {formatStakeAmount(stake, stakeCurrency)}
+            </p>
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Your card is charged only if you don&apos;t complete your goal by the deadline.
+          </p>
+        </div>
       )}
 
-      <div className={`relative braintree-dark ${hideContent ? 'min-h-[320px]' : 'min-h-[180px]'}`}>
-        {tokenError && <p className="text-sm text-destructive">{tokenError}</p>}
-        {clientToken && mountDropin && (
-          <DropIn
-            key={dropinKey}
-            options={{
-              authorization: clientToken,
-              card: { cardholderName: true },
-              paypal: false,
-            }}
-            onInstance={(instance) => {
-              setDropinReady(true);
-              onDropinReady(instance);
-            }}
+      <div className={`relative flex-1 min-h-0 ${hideContent ? 'min-h-[140px]' : ''}`}>
+        {tokenError && (
+          <p className="rounded-xl bg-muted px-3 py-2 text-xs text-destructive ring-2 ring-destructive">
+            {tokenError}
+          </p>
+        )}
+        {clientToken && !tokenError && (
+          <BraintreeHostedCardForm
+            key={`${clientToken}-${formKey}`}
+            clientToken={clientToken}
+            onReady={handleReady}
+            onError={handleFormError}
+            onFieldsCompleteChange={onCardFieldsCompleteChange}
           />
         )}
-        {clientToken && !dropinReady && !loadingToken && !tokenError && (
+        {clientToken && !formReady && !loadingToken && !tokenError && (
           <button
             type="button"
-            onClick={() => setDropinKey((k) => k + 1)}
-            className="absolute right-2 top-2 z-30 rounded-lg border border-border bg-background/60 px-2 py-1 text-xs text-foreground hover:bg-background/80"
+            onClick={() => {
+              setFormKey((k) => k + 1);
+              setFormReady(false);
+              onCardFieldsCompleteChange?.(false);
+            }}
+            className="absolute right-0 top-0 z-30 rounded-xl bg-muted px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             Retry
           </button>
         )}
       </div>
-      {(loadingToken || (clientToken && !dropinReady)) && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-2xl bg-background px-6">
-          <div className="h-7 w-7 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
-          <p className="text-sm text-muted-foreground">
-            Loading secure card form…
-          </p>
+
+      {!hideContent && !showLoading && (
+        <p className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+          <Lock className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
+          Encrypted · PCI compliant
+        </p>
+      )}
+
+      {showLoading && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-2xl bg-background/95 px-6 backdrop-blur-[2px]">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary/25 border-t-primary" aria-hidden />
+          <p className="text-sm text-muted-foreground">Preparing secure checkout…</p>
         </div>
       )}
     </div>
@@ -272,16 +216,31 @@ export function CardStepContinueButton({
   onPaymentMethodReady,
   dropinInstance,
   onSubmittingChange,
+  consentAccepted,
+  cardFieldsComplete,
 }: {
   onPaymentMethodReady: (payload: { token: string; customerId: string | null }) => void;
-  dropinInstance: Dropin | null;
+  dropinInstance: BraintreePaymentInstance | null;
   onSubmittingChange?: (isSubmitting: boolean) => void;
+  consentAccepted: boolean;
+  cardFieldsComplete: boolean;
 }) {
   const [submitting, setSubmitting] = useState(false);
 
+  const fieldsReady =
+    cardFieldsComplete || dropinInstance?.isCardFormComplete?.() === true;
+
   const handleContinue = async () => {
+    if (!consentAccepted) {
+      toast.error('Please confirm the payment authorization notice to continue.');
+      return;
+    }
     if (!dropinInstance) {
       toast.error('Payment form is still loading. Please wait and try again.');
+      return;
+    }
+    if (!fieldsReady) {
+      toast.error('Please enter your complete card details.');
       return;
     }
     setSubmitting(true);
@@ -324,10 +283,10 @@ export function CardStepContinueButton({
     <button
       type="button"
       onClick={handleContinue}
-      disabled={submitting}
-      className="flex-1 py-4 rounded-2xl bg-primary text-primary-foreground font-display font-bold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+      disabled={submitting || !dropinInstance || !fieldsReady}
+      className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary py-4 font-display font-bold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
     >
-      {submitting ? 'Saving card…' : <>Continue <ChevronRight className="w-4 h-4" /></>}
+      {submitting ? 'Saving card…' : <>Save card <ChevronRight className="h-4 w-4" /></>}
     </button>
   );
 }

@@ -1,0 +1,212 @@
+/* Owe It — Braintree Drop-in: compact dark theme matching app inputs */
+
+.owe-braintree {
+  color-scheme: dark;
+}
+
+.owe-braintree .braintree-dropin {
+  font-family: 'Schibsted Grotesk', system-ui, sans-serif !important;
+  line-height: 1.3 !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.owe-braintree .braintree-dropin,
+.owe-braintree .braintree-dropin *,
+.owe-braintree .braintree-dropin-wrapper,
+.owe-braintree [id^='braintree--dropin__'] {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* Kill default white sheet / card chrome (Braintree CDN css loads later — see injectBraintreeOverrides.ts) */
+.owe-braintree .braintree-dropin .braintree-upper-container,
+.owe-braintree .braintree-dropin .braintree-sheet__container,
+.owe-braintree .braintree-dropin .braintree-sheet,
+.owe-braintree .braintree-dropin .braintree-card,
+.owe-braintree .braintree-dropin .braintree-form.braintree-sheet,
+.owe-braintree .braintree-dropin .braintree-sheet__content,
+.owe-braintree .braintree-dropin .braintree-sheet__content--form,
+.owe-braintree .braintree-dropin .braintree-sheet--active .braintree-sheet {
+  background: #0f0f0f !important;
+  background-color: #0f0f0f !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  max-height: none !important;
+}
+
+.owe-braintree .braintree-dropin,
+.owe-braintree .braintree-dropin-wrapper,
+.owe-braintree [id^='braintree--dropin__'] {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+}
+
+.owe-braintree .braintree-dropin .braintree-sheet__header,
+.owe-braintree .braintree-dropin .braintree-lower-container,
+.owe-braintree .braintree-dropin [data-braintree-id='lower-container'],
+.owe-braintree .braintree-dropin .braintree-loader__container,
+.owe-braintree .braintree-dropin [data-braintree-id='loading-container'],
+.owe-braintree .braintree-dropin [data-braintree-id='notice-of-collection'],
+.owe-braintree .braintree-dropin .braintree-form__notice-of-collection {
+  display: none !important;
+}
+
+/* Compact labels */
+.owe-braintree .braintree-dropin .braintree-form__label,
+.owe-braintree .braintree-dropin .braintree-sheet__content--form .braintree-form__field-group .braintree-form__label {
+  color: hsl(var(--muted-foreground)) !important;
+  font-size: 0.625rem !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  line-height: 1.2 !important;
+  margin: 0 0 0.25rem !important;
+  padding: 0 !important;
+}
+
+/* Compact field groups */
+.owe-braintree .braintree-dropin .braintree-form__field-group,
+.owe-braintree .braintree-dropin .braintree-sheet__content--form .braintree-form__field-group {
+  margin: 0 0 0.5rem !important;
+  padding: 0 !important;
+  padding-left: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.owe-braintree .braintree-dropin .braintree-form__field-group:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* Single compact input block (matches bg-muted rounded-xl) */
+.owe-braintree .braintree-dropin .braintree-form__field,
+.owe-braintree .braintree-dropin .braintree-sheet__content--form .braintree-form__field-group .braintree-form__field {
+  position: relative !important;
+  background: hsl(var(--muted)) !important;
+  background-color: hsl(var(--muted)) !important;
+  border: 0 !important;
+  border-radius: 0.75rem !important;
+  padding: 0.5rem 0.75rem !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+  transition: box-shadow 0.15s ease !important;
+}
+
+.owe-braintree .braintree-dropin .braintree-form__field-group:focus-within .braintree-form__field,
+.owe-braintree .braintree-dropin .braintree-form__field-group.braintree-form__field-group--is-focused .braintree-form__field {
+  box-shadow: 0 0 0 2px hsl(var(--primary)) !important;
+  outline: 2px solid hsl(var(--primary)) !important;
+  outline-offset: 0 !important;
+}
+
+.owe-braintree .braintree-dropin .braintree-form__field-group.braintree-form__field-group--has-error .braintree-form__field {
+  box-shadow: 0 0 0 2px hsl(var(--destructive)) !important;
+}
+
+/* Hosted field interior — same muted fill as app inputs (not transparent / white) */
+.owe-braintree .braintree-dropin .braintree-form__hosted-field,
+.owe-braintree .braintree-dropin .braintree-sheet__content--form .braintree-form__field-group .braintree-form__field .braintree-form__hosted-field {
+  background: hsl(var(--muted)) !important;
+  background-color: hsl(var(--muted)) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  height: 1.25rem !important;
+  min-height: 1.25rem !important;
+  max-height: 1.25rem !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
+.owe-braintree .braintree-dropin .braintree-form__hosted-field:hover,
+.owe-braintree .braintree-dropin .braintree-form__hosted-field.braintree-form__field--valid,
+.owe-braintree .braintree-dropin .braintree-sheet__content--form .braintree-form__field-group.braintree-form__field-group--has-error .braintree-form__field .braintree-form__hosted-field,
+.owe-braintree .braintree-dropin .braintree-sheet__content--form .braintree-form__field-group.braintree-form__field-group--has-error .braintree-form__field .braintree-form__hosted-field:hover {
+  border: 0 !important;
+  background: hsl(var(--muted)) !important;
+  background-color: hsl(var(--muted)) !important;
+}
+
+.owe-braintree .braintree-dropin .braintree-form__hosted-field iframe {
+  display: block !important;
+  width: 100% !important;
+  height: 1.25rem !important;
+  min-height: 1.25rem !important;
+  max-height: 1.25rem !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: hsl(var(--muted)) !important;
+  background-color: hsl(var(--muted)) !important;
+  color-scheme: dark;
+}
+
+/* Cardholder name input */
+.owe-braintree .braintree-dropin input.braintree-form__raw-input,
+.owe-braintree .braintree-dropin .braintree-sheet__content--form .braintree-form__field-group .braintree-form__field .braintree-form__hosted-field input.braintree-form__raw-input {
+  width: 100% !important;
+  height: 1.25rem !important;
+  min-height: 1.25rem !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  outline: none !important;
+  background: hsl(var(--muted)) !important;
+  background-color: hsl(var(--muted)) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  color: hsl(var(--foreground)) !important;
+  -webkit-text-fill-color: hsl(var(--foreground)) !important;
+  caret-color: hsl(var(--foreground)) !important;
+  font-family: 'Schibsted Grotesk', system-ui, sans-serif !important;
+  font-size: 0.875rem !important;
+  font-weight: 400 !important;
+  line-height: 1.25rem !important;
+}
+
+.owe-braintree .braintree-dropin input.braintree-form__raw-input:-webkit-autofill,
+.owe-braintree .braintree-dropin input.braintree-form__raw-input:-webkit-autofill:hover,
+.owe-braintree .braintree-dropin input.braintree-form__raw-input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px hsl(var(--muted)) inset !important;
+  -webkit-text-fill-color: hsl(var(--foreground)) !important;
+  caret-color: hsl(var(--foreground)) !important;
+}
+
+.owe-braintree .braintree-dropin input.braintree-form__raw-input::placeholder {
+  color: hsl(var(--muted-foreground)) !important;
+  opacity: 1 !important;
+}
+
+/* Expiry + number row — tighter */
+.owe-braintree .braintree-dropin .braintree-form__flexible-fields,
+.owe-braintree .braintree-dropin .braintree-sheet__content--form .braintree-form__flexible-fields {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 0.5rem !important;
+  margin: 0 !important;
+}
+
+.owe-braintree .braintree-dropin .braintree-form__flexible-fields .braintree-form__field-group {
+  flex: 1 1 6.5rem !important;
+  margin-bottom: 0 !important;
+}
+
+.owe-braintree .braintree-dropin .braintree-form__field-error,
+.owe-braintree .braintree-dropin .braintree-sheet__content--form .braintree-form__field-group .braintree-form__field-error {
+  color: hsl(var(--destructive)) !important;
+  font-size: 0.6875rem !important;
+  line-height: 1.3 !important;
+  margin: 0.2rem 0 0 !important;
+  padding: 0 !important;
+}
+
+.owe-braintree .braintree-dropin .braintree-form__icon-container,
+.owe-braintree .braintree-dropin .braintree-form__field-secondary-icon,
+.owe-braintree .braintree-dropin .braintree-form__field-error-icon {
+  display: none !important;
+}

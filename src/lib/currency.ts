@@ -172,10 +172,29 @@ export function normalizeStakeCurrency(value: unknown): StakeCurrency {
     : DEFAULT_STAKE_CURRENCY;
 }
 
+function stakeCurrencySymbol(currency: StakeCurrency): string {
+  try {
+    const part = new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency: currency.toUpperCase(),
+      currencyDisplay: 'narrowSymbol',
+    })
+      .formatToParts(0)
+      .find((p) => p.type === 'currency');
+    if (part?.value) return part.value;
+  } catch {
+    // ignore
+  }
+  return currency.toUpperCase();
+}
+
 export function formatStakeAmount(amount: number, currency: string): string {
   const safeAmount = Number.isFinite(amount) ? amount : 0;
   const normalized = normalizeStakeCurrency(currency);
   const roundedCents = Math.round(safeAmount * 100);
+  if (roundedCents === 0) {
+    return `0${stakeCurrencySymbol(normalized)}`;
+  }
   const hasCents = roundedCents % 100 !== 0;
   return new Intl.NumberFormat(undefined, {
     style: 'currency',

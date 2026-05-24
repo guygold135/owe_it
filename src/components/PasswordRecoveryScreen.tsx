@@ -42,11 +42,11 @@ export function PasswordRecoveryScreen() {
         animate={{ opacity: 1, y: 0 }}
         className="text-center mb-12"
       >
-        <div className="w-24 h-24 mx-auto mb-6 flex items-center justify-center">
+        <div className="mx-auto mb-6 h-24 w-24 overflow-hidden rounded-[28px] shadow-sm">
           <img
             src={APP_LOGO_SRC}
             alt=""
-            className="h-full w-full object-contain drop-shadow-sm select-none"
+            className="h-full w-full object-cover select-none"
             width={96}
             height={96}
             decoding="async"

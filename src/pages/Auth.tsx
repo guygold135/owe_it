@@ -273,13 +273,13 @@ export default function Auth() {
           transition={{ duration: 0.28, ease: 'easeOut' }}
           className="mb-10 text-center"
         >
-          <div className="mx-auto mb-5 flex h-24 w-24 items-center justify-center rounded-[28px] bg-card/55 p-3 backdrop-blur-md">
+          <div className="mx-auto mb-5 h-24 w-24 overflow-hidden rounded-[28px] shadow-sm">
             <img
               src={APP_LOGO_SRC}
               alt=""
-              className="h-full w-full object-contain drop-shadow-sm select-none"
-              width={72}
-              height={72}
+              className="h-full w-full object-cover select-none"
+              width={96}
+              height={96}
               decoding="async"
               loading="eager"
               fetchPriority="high"

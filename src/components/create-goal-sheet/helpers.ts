@@ -1,4 +1,4 @@
-import { USD_TO_CURRENCY_RATE } from '@/lib/currency';
+import { normalizeStakeCurrency, USD_TO_CURRENCY_RATE } from '@/lib/currency';
 import { isStripeZeroDecimalCurrency } from '@/lib/stripeCurrency';
 
 export const steps = ['goal', 'stake', 'judge', 'card', 'confirm'] as const;
@@ -100,9 +100,10 @@ export function isRequirementsContentEmpty(text: string): boolean {
 }
 
 export function formatStakePresetAmount(amount: number, currency: string): string {
-  return new Intl.NumberFormat(undefined, {
+  const normalized = normalizeStakeCurrency(currency);
+  return new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: currency.toUpperCase(),
+    currency: normalized.toUpperCase(),
     minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
     maximumFractionDigits: 2,
   }).format(amount);

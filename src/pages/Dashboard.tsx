@@ -33,7 +33,7 @@ import { ResolvedGoalSpotlight } from '@/components/ResolvedGoalSpotlight';
 import { ChevronDown, Edit2, Plus, Trash2, TriangleAlert, Trophy } from 'lucide-react';
 import UserProfilePopover from '@/components/UserProfilePopover';
 import { DashboardStatsSkeleton, GoalsListSkeleton } from '@/components/PageSkeletons';
-import { convertStakeAmount, formatStakeAmount } from '@/lib/currency';
+import { convertStakeAmount, formatStakeAmountAtRisk } from '@/lib/currency';
 import { convertStakeAmountLive } from '@/lib/exchangeRates';
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
 import { unmarkTutorialCreatedGoal } from '@/lib/appTutorial';
@@ -1135,7 +1135,7 @@ export default function Dashboard() {
                   </svg>
                 </div>
                 <p className="text-2xl font-display font-extrabold text-primary tabular-nums">
-                  {formatStakeAmount(liveTotalAtRisk, selectedCurrency)}
+                  {formatStakeAmountAtRisk(liveTotalAtRisk, selectedCurrency)}
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">At Risk</p>
               </div>

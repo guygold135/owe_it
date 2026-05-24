@@ -192,9 +192,6 @@ export function formatStakeAmount(amount: number, currency: string): string {
   const safeAmount = Number.isFinite(amount) ? amount : 0;
   const normalized = normalizeStakeCurrency(currency);
   const roundedCents = Math.round(safeAmount * 100);
-  if (roundedCents === 0) {
-    return `0${stakeCurrencySymbol(normalized)}`;
-  }
   const hasCents = roundedCents % 100 !== 0;
   return new Intl.NumberFormat(undefined, {
     style: 'currency',
@@ -202,6 +199,16 @@ export function formatStakeAmount(amount: number, currency: string): string {
     minimumFractionDigits: hasCents ? 2 : 0,
     maximumFractionDigits: hasCents ? 2 : 0,
   }).format(safeAmount);
+}
+
+/** Dashboard “At Risk” zero — avoids locale suffixes like `0 US$` on iPhone. */
+export function formatStakeAmountAtRisk(amount: number, currency: string): string {
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
+  const normalized = normalizeStakeCurrency(currency);
+  if (Math.round(safeAmount * 100) === 0) {
+    return `0${stakeCurrencySymbol(normalized)}`;
+  }
+  return formatStakeAmount(safeAmount, currency);
 }
 
 export function convertStakeAmount(amount: number, fromCurrency: string, toCurrency: string): number {

@@ -1,13 +1,13 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { buildCorsHeaders } from "../_shared/cors.ts";
+import { getResendFromAddress } from "../_shared/resendFrom.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
 const resendApiKey = Deno.env.get("RESEND_API_KEY");
 const feedbackToEmail = Deno.env.get("FEEDBACK_TO_EMAIL");
-const feedbackFromEmail = Deno.env.get("FEEDBACK_FROM_EMAIL") ?? "feedback@oweit.app";
 
 const allowedCategories = new Set([
   "Improvement idea",
@@ -62,7 +62,7 @@ async function sendFeedbackEmail(params: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: feedbackFromEmail,
+      from: getResendFromAddress(),
       to: [feedbackToEmail],
       subject: `[Feedback] ${params.category}`,
       html,

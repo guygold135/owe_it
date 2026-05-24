@@ -289,7 +289,7 @@ export default function Auth() {
             Owe It
           </h1>
           <p className="mt-2 text-sm font-medium text-foreground/85">
-            Win for yourself or give for a cause.
+            Let us decide which charity.
             <br />
             Either way, something good happens.
           </p>

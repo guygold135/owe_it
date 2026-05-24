@@ -10,6 +10,7 @@ import { AppTutorialChrome } from "@/components/AppTutorialChrome";
 import { AppTutorialProvider, useAppTutorial } from "@/hooks/useAppTutorial";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { useAbandonStaleJudgeRequestsOnBootstrap } from "@/hooks/useAbandonStaleJudgeRequestsOnBootstrap";
+import { usePendingJudgeInviteRedirect } from "@/hooks/usePendingJudgeInviteRedirect";
 import { JudgeRequestToastHost } from "@/components/JudgeRequestToastHost";
 import { JudgeGoalCreatedNoticeHost } from "@/components/JudgeGoalCreatedNoticeHost";
 import { DeadlineReminderToastHost } from "@/components/DeadlineReminderToastHost";
@@ -42,6 +43,7 @@ const FeedbackRouter = lazy(() => import("./pages/FeedbackRouter"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Terms = lazy(() => import("./pages/Terms"));
 const Privacy = lazy(() => import("./pages/Privacy"));
+const JudgeInviteAccept = lazy(() => import("./pages/JudgeInviteAccept"));
 const CreateGoalSheet = lazy(() =>
   import("@/components/CreateGoalSheet").then((mod) => ({ default: mod.CreateGoalSheet })),
 );
@@ -149,6 +151,7 @@ function AppRoutes() {
         <Suspense fallback={<BootstrapLogoScreen />}>
           <Routes>
             <Route path="/auth" element={<Auth />} />
+            <Route path="/judge-invite/:requestId" element={<JudgeInviteAccept />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="*" element={<Navigate to="/auth" replace />} />
@@ -182,6 +185,7 @@ function LoggedInAppShell({
   setCreateOpen: (v: boolean) => void;
 }) {
   const { phase, tutorialBootBlocking, fabSpotlight, onFabPhaseCreateOpened, highlightNavTab } = useAppTutorial();
+  usePendingJudgeInviteRedirect();
   const isFetching = useIsFetching();
   const [showShellSplash, setShowShellSplash] = useState(() =>
     typeof window !== 'undefined' ? sessionStorage.getItem(SHELL_SPLASH_KEY) !== '1' : false,
@@ -258,6 +262,7 @@ function LoggedInAppShell({
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/feedback" element={<FeedbackRouter />} />
+            <Route path="/judge-invite/:requestId" element={<JudgeInviteAccept />} />
             <Route path="/admin-feedback" element={<Navigate to="/feedback" replace />} />
             <Route path="/auth" element={<Navigate to="/" replace />} />
             <Route path="*" element={<NotFound />} />

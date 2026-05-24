@@ -16,7 +16,7 @@ export const DEFAULT_CHARITY_ID = 'default';
 export const CHARITY_OPTIONS: CharityOption[] = [
   {
     id: 'default',
-    name: 'Default charity pool',
+    name: 'Let us decide which charity',
     subtitle: 'Failed stakes go to this pool after Stripe and platform fees.',
   },
 ];

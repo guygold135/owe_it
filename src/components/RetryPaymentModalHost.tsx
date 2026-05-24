@@ -372,7 +372,7 @@ export function RetryPaymentModalHost() {
       };
 
       if (!goalId) {
-        openConfirm(getCharityOptionById(null)?.name ?? 'Default charity pool');
+        openConfirm(getCharityOptionById(null)?.name ?? 'Let us decide which charity');
         return;
       }
 
@@ -383,11 +383,11 @@ export function RetryPaymentModalHost() {
         .maybeSingle()
         .then(({ data }) => {
           const charityId = (data as { charity_id?: string | null } | null)?.charity_id ?? null;
-          const charityName = getCharityOptionById(charityId)?.name ?? getCharityOptionById(null)?.name ?? 'Default charity pool';
+          const charityName = getCharityOptionById(charityId)?.name ?? getCharityOptionById(null)?.name ?? 'Let us decide which charity';
           openConfirm(charityName);
         })
         .catch(() => {
-          openConfirm(getCharityOptionById(null)?.name ?? 'Default charity pool');
+          openConfirm(getCharityOptionById(null)?.name ?? 'Let us decide which charity');
         });
     };
 
@@ -477,7 +477,7 @@ export function RetryPaymentModalHost() {
             </AlertDialogTitle>
             <AlertDialogDescription className="text-left text-sm text-muted-foreground">
               If you dismiss this alert, you will not have another way to pay this stake, and it will not go to your chosen charity:{' '}
-              <span className="font-semibold text-foreground">{dismissConfirmContext?.charityName ?? 'Default charity pool'}</span>.
+              <span className="font-semibold text-foreground">{dismissConfirmContext?.charityName ?? 'Let us decide which charity'}</span>.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2 sm:gap-0">

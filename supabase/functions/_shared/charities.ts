@@ -27,7 +27,7 @@ export const DEFAULT_CHARITY_ID = "default";
 export const CHARITIES: CharityDef[] = [
   {
     id: "default",
-    name: "Default charity pool",
+    name: "Let us decide which charity",
     subtitle: "Failed stakes go here after fees (configure Stripe Connect to pay out automatically).",
     stripeConnectAccountId: null,
   },

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { TutorialCard } from '@/components/TutorialCard';
 import { useAppTutorial } from '@/hooks/useAppTutorial';
 import { APP_TUTORIAL_SHEET_STEP_TO_PHASE, isAppTutorialSheetPhase } from '@/lib/appTutorial';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar, Heart, UserPlus } from 'lucide-react';
+import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar, UserPlus } from 'lucide-react';
 import type { BraintreePaymentInstance } from '@/components/braintree/braintreePayment';
 import { useGoals } from '@/hooks/useGoals';
 import { useAuth } from '@/hooks/useAuth';
@@ -16,8 +16,7 @@ import { formatStakeAmount } from '@/lib/currency';
 import { stakeMajorToStripeUnits } from '@/lib/stripeCurrency';
 import { useStakeCurrencyPreference } from '@/hooks/useStakeCurrencyPreference';
 import { useMinimumStakeMajor } from '@/hooks/useMinimumStakeMajor';
-import { useShortDeadlineTesting } from '@/hooks/useShortDeadlineTesting';
-import { CHARITY_OPTIONS, DEFAULT_CHARITY_ID } from '@/lib/charities';
+import { CHARITY_OPTIONS, DEFAULT_CHARITY_ID, getCharityOptionById } from '@/lib/charities';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,17 +39,28 @@ import {
 import {
   buildPresetStakesForCurrency,
   formatStakePresetAmount,
+  clampDeadlineDatetimeLocal,
   getDeadlineValidationError,
+  getDefaultDeadlineDatetimeLocal,
+  getEarliestSelectableDeadline,
   isRequirementsContentEmpty,
-  MIN_DEADLINE_LEAD_MS,
+  parseDatetimeLocal,
   normalizeRequirementLines,
   REQUIREMENT_BULLET,
   roundStakeMajor,
   steps,
   toDatetimeLocalString,
 } from '@/components/create-goal-sheet/helpers';
+import { notifyJudgeRequestByEmail } from '@/lib/notifyJudgeRequestEmail';
 import { CardStepContinueButton, CardStepFields } from '@/components/create-goal-sheet/CardStep';
 import { PaymentMethodConsentNotice } from '@/components/PaymentMethodConsentNotice';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 type CloseConfirmKind = 'judge-wait' | 'card' | 'sign' | 'tutorial-exit';
 
@@ -161,7 +171,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const [selfAvatarUrl, setSelfAvatarUrl] = useState<string | null>(() => readProfileAvatarFromStorage(user?.id));
   const { currency: stakeCurrency } = useStakeCurrencyPreference();
   const { minimumStake } = useMinimumStakeMajor(stakeCurrency);
-  const { enabled: allowShortDeadlines } = useShortDeadlineTesting();
+  const allowShortDeadlines = false;
   const deadlineInputRef = useRef<HTMLInputElement | null>(null);
   const goalTitleInputRef = useRef<HTMLInputElement | null>(null);
   const requirementsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -182,6 +192,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const [customStakeInput, setCustomStakeInput] = useState('');
   const [selectedCharityId, setSelectedCharityId] = useState(DEFAULT_CHARITY_ID);
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [showAddFriendPanel, setShowAddFriendPanel] = useState(false);
+  const addFriendPanelRef = useRef<HTMLDivElement>(null);
+  const addFriendInputRef = useRef<HTMLInputElement>(null);
   const [judgeByIdInput, setJudgeByIdInput] = useState('');
   const [judgeByIdSearching, setJudgeByIdSearching] = useState(false);
   const [judgeByIdError, setJudgeByIdError] = useState<string | null>(null);
@@ -199,6 +212,12 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const preserveDraftOnNextCloseRef = useRef(false);
   /** judge-wait dialog: full sheet close (X/backdrop) vs return to judge picker (Back button) */
   const judgeWaitDismissRef = useRef<'sheet' | 'back-to-picker'>('sheet');
+
+  useLayoutEffect(() => {
+    if (!showAddFriendPanel) return;
+    addFriendPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    addFriendInputRef.current?.focus();
+  }, [showAddFriendPanel]);
 
   useEffect(() => {
     judgeRequestIdRef.current = judgeRequestId;
@@ -270,8 +289,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
   const deadlineDate = useMemo(() => {
     if (!deadline) return null;
-    const d = new Date(deadline);
-    return Number.isNaN(d.getTime()) ? null : d;
+    return parseDatetimeLocal(deadline);
   }, [deadline]);
 
   const deadlineIssue = useMemo(
@@ -279,13 +297,58 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     [deadline, deadlineDate, allowShortDeadlines],
   );
 
-  /** Earliest `datetime-local` value (now + 1 day + 1min, rounded) so the native picker matches validation. */
-  const minDeadlineInput = useMemo(() => {
-    const minLeadMs = allowShortDeadlines ? 60 * 1000 : MIN_DEADLINE_LEAD_MS + 60 * 1000;
-    const d = new Date(Date.now() + minLeadMs);
-    d.setSeconds(0, 0);
-    return toDatetimeLocalString(d);
-  }, [allowShortDeadlines]);
+  /** Recomputed each render so `min` stays current while the sheet is open (native pickers ignore stale `min`). */
+  const minDeadlineInput = toDatetimeLocalString(getEarliestSelectableDeadline(allowShortDeadlines));
+
+  const applyDeadlinePick = useCallback(
+    (value: string) => {
+      setDeadline(clampDeadlineDatetimeLocal(value, allowShortDeadlines));
+    },
+    [allowShortDeadlines],
+  );
+
+  /** Default deadline = earliest allowed; clamp anything earlier (native `min` is not enforced everywhere). */
+  useEffect(() => {
+    if (!open) return;
+    setDeadline((prev) => clampDeadlineDatetimeLocal(prev, allowShortDeadlines));
+  }, [open, allowShortDeadlines]);
+
+  /** Keep value ≥ min whenever the sheet is open (picker UI can still show earlier times). */
+  useLayoutEffect(() => {
+    if (!open || !deadline) return;
+    const clamped = clampDeadlineDatetimeLocal(deadline, allowShortDeadlines);
+    if (clamped !== deadline) setDeadline(clamped);
+  }, [open, deadline, minDeadlineInput, allowShortDeadlines]);
+
+  /** If the user keeps the sheet open, bump the value when it falls below the moving 24h floor. */
+  useEffect(() => {
+    if (!open) return;
+    const id = window.setInterval(() => {
+      setDeadline((prev) => clampDeadlineDatetimeLocal(prev, allowShortDeadlines));
+    }, 15_000);
+    return () => window.clearInterval(id);
+  }, [open, allowShortDeadlines]);
+
+  /** Keep native `min` in sync — React props alone are ignored by some picker UIs. */
+  useLayoutEffect(() => {
+    if (!open) return;
+    const el = deadlineInputRef.current;
+    if (el) el.min = minDeadlineInput;
+  }, [open, minDeadlineInput]);
+
+  const openDeadlinePicker = useCallback(() => {
+    const minStr = toDatetimeLocalString(getEarliestSelectableDeadline(allowShortDeadlines));
+    const clamped = clampDeadlineDatetimeLocal(deadline, allowShortDeadlines);
+    if (clamped !== deadline) {
+      flushSync(() => setDeadline(clamped));
+    }
+    const el = deadlineInputRef.current;
+    if (!el) return;
+    // Native pickers often ignore a stale `min`; sync right before opening.
+    el.min = minStr;
+    (el as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
+    el.focus();
+  }, [deadline, allowShortDeadlines]);
 
   /** Same title as another active goal (same account), case-insensitive, trimmed */
   const duplicateActiveTitle = useMemo(() => {
@@ -605,7 +668,8 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
   const reset = () => {
     setStep(0); setTitle(''); setDescription(''); setStake(0);
-    setDeadline(''); setJudge(null); setIsPrivate(false);
+    setDeadline(getDefaultDeadlineDatetimeLocal(allowShortDeadlines));
+    setJudge(null); setIsPrivate(false);
     setBraintreePaymentMethodToken(null); setBraintreeCustomerId(null); setBraintreeDropinInstance(null);
     setCardFieldsComplete(false);
     setCardStepSubmitting(false);
@@ -770,7 +834,14 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               setWaitingJudgeName(null);
               return;
             }
-            setJudgeRequestId(typeof data === 'string' ? data : null);
+            const requestId = typeof data === 'string' ? data : null;
+            setJudgeRequestId(requestId);
+            if (requestId) {
+              const emailed = await notifyJudgeRequestByEmail(requestId);
+              if (emailed) {
+                toast.success(`Invite email sent to ${judge.name}.`);
+              }
+            }
           } catch (e: unknown) {
             console.error('Unexpected judge request error', e);
             toast.error(e instanceof Error ? e.message : 'Could not send judge request.');
@@ -899,7 +970,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
         stake: 0,
         stakeCurrency,
         charityId: null,
-        deadline: new Date(deadline),
+        deadline: deadlineDate!,
         createdAt: new Date(),
         resolvedAt: null,
         status: 'active',
@@ -922,7 +993,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       userId: user.id,
       goalTitle: title,
       description,
-      deadline: new Date(deadline).toISOString(),
+      deadline: deadlineDate!.toISOString(),
       judgeName: judge?.isSelf ? null : judge?.name,
       judgeUserId: judge?.isSelf ? user.id : judge?.id,
       isPrivate,
@@ -1187,21 +1258,11 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     <div
                       role="button"
                       tabIndex={0}
-                      onClick={() => {
-                        const el = deadlineInputRef.current;
-                        if (!el) return;
-                        // iOS Safari: opening can fail if the input is fully transparent.
-                        // Prefer showPicker when available, else focus.
-                        (el as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
-                        el.focus();
-                      }}
+                      onClick={openDeadlinePicker}
                       onKeyDown={(e) => {
                         if (e.key !== 'Enter' && e.key !== ' ') return;
                         e.preventDefault();
-                        const el = deadlineInputRef.current;
-                        if (!el) return;
-                        (el as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
-                        el.focus();
+                        openDeadlinePicker();
                       }}
                       className={`relative w-full max-w-full bg-muted rounded-2xl ${
                         deadlineIssue ? 'ring-2 ring-destructive' : ''
@@ -1214,7 +1275,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         }`}
                       >
                         <span className="truncate">
-                          {deadline ? new Date(deadline).toLocaleString() : 'Select a deadline'}
+                          {deadlineDate ? deadlineDate.toLocaleString() : 'Select a deadline'}
                         </span>
                         <Calendar className="w-5 h-5 shrink-0 text-muted-foreground" />
                       </div>
@@ -1225,9 +1286,12 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         type="datetime-local"
                         value={deadline}
                         min={minDeadlineInput}
-                        onChange={e => setDeadline(e.target.value)}
+                        step={60}
+                        onChange={(e) => applyDeadlinePick(e.target.value)}
+                        onInput={(e) => applyDeadlinePick(e.currentTarget.value)}
+                        onBlur={(e) => applyDeadlinePick(e.target.value)}
                         aria-invalid={deadlineIssue ? true : undefined}
-                        className="absolute inset-0 z-10 w-full max-w-full cursor-pointer bg-transparent text-transparent caret-transparent opacity-[0.01] appearance-none [color-scheme:dark]"
+                        className="absolute inset-0 top-0 left-0 z-10 h-full w-full max-w-full cursor-pointer bg-transparent text-transparent caret-transparent opacity-[0.01] appearance-none [color-scheme:dark]"
                       />
                     </div>
                     {deadlineIssue && (
@@ -1290,29 +1354,28 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     ))}
                   </div>
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
-                      <Heart className="h-3 w-3 shrink-0" aria-hidden />
-                      <span>If you fail, stake goes to</span>
-                    </div>
+                    <p className="text-xs uppercase tracking-widest text-muted-foreground">
+                      If you fail, stake goes to
+                    </p>
                     {stake > 0 ? (
                       <div className="flex flex-col gap-1">
-                        {CHARITY_OPTIONS.map((c) => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => setSelectedCharityId(c.id)}
-                            className={`w-full rounded-xl border px-3 py-2 text-left transition-colors ${
-                              selectedCharityId === c.id
-                                ? 'border-primary bg-primary/10 ring-1 ring-primary/30'
-                                : 'border-border bg-muted/50 hover:bg-muted/80'
-                            }`}
-                          >
-                            <p className="font-display font-semibold text-sm text-foreground leading-tight">{c.name}</p>
-                            {c.subtitle ? (
-                              <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug">{c.subtitle}</p>
-                            ) : null}
-                          </button>
-                        ))}
+                        <Select value={selectedCharityId} onValueChange={setSelectedCharityId}>
+                          <SelectTrigger className="h-auto w-full rounded-xl border border-primary bg-primary/10 px-3 py-2 text-left font-display font-semibold text-sm text-foreground ring-1 ring-primary/30 hover:bg-primary/15 focus:ring-primary/30">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="rounded-xl">
+                            {CHARITY_OPTIONS.map((c) => (
+                              <SelectItem key={c.id} value={c.id} className="rounded-lg font-display">
+                                {c.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {getCharityOptionById(selectedCharityId)?.subtitle ? (
+                          <p className="px-0.5 text-[11px] text-muted-foreground leading-snug">
+                            {getCharityOptionById(selectedCharityId)?.subtitle}
+                          </p>
+                        ) : null}
                       </div>
                     ) : (
                       <p className="text-[11px] text-muted-foreground rounded-xl border border-border bg-muted/30 px-3 py-2 leading-snug">
@@ -1386,7 +1449,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       <p>Minimum paid stake: {formatStakeAmount(minimumStake, stakeCurrency)}.</p>
                       <p>
                         Only if the stake is charged, the combined payment processing and app fee is{' '}
-                        <span className="text-foreground/90">6.7% + US$0.50</span>. The rest is transferred to the charity
+                        <span className="text-foreground/90">6.7%</span>. The rest is transferred to the charity
                         you selected.
                       </p>
                       <p>
@@ -1411,7 +1474,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                           waiting for {waitingJudgeName ?? 'your friend'} to accept
                         </p>
                         <p className="mt-2 text-xs text-muted-foreground">
-                          They’ll see your goal details and can accept or ignore.
+                          They&apos;ll get an email with a link to sign in and accept, and can also respond in the app.
                         </p>
                       </div>
                       <button
@@ -1429,11 +1492,11 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                   )}
 
                   {!judgeRequestId && (
-                    <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto">
+                    <div className="flex min-h-0 flex-1 flex-col">
                       {/* Self judge option */}
                       <button
                         onClick={() => setJudge({ id: 'self', name: 'You', avatar: '', isSelf: true })}
-                        className={`w-full p-5 rounded-[20px] border text-left transition-all ${
+                        className={`w-full shrink-0 p-5 rounded-[20px] border text-left transition-all ${
                           judge?.isSelf ? 'border-primary bg-primary/5' : 'border-border hover:border-muted-foreground/30'
                         }`}
                       >
@@ -1456,13 +1519,14 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         </div>
                       </button>
 
-                      <p className="text-xs uppercase tracking-widest text-muted-foreground">Your Friends</p>
+                      <div className="mt-4 flex min-h-0 flex-1 flex-col gap-3">
+                        <p className="shrink-0 text-xs uppercase tracking-widest text-muted-foreground">Your Friends</p>
 
-                      {friends.length > 0 ? (
-                        <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-                          {friends.map(friend => (
+                        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+                          {friends.map((friend) => (
                             <button
                               key={friend.id}
+                              type="button"
                               onClick={() => setJudge({ id: friend.id, name: friend.name, avatar: friend.avatar, isSelf: false })}
                               className={`w-full p-5 rounded-[20px] border text-left transition-all ${
                                 judge?.id === friend.id ? 'border-primary bg-primary/5' : 'border-border hover:border-muted-foreground/30'
@@ -1472,7 +1536,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                                 <Avatar className="h-12 w-12">
                                   <AvatarImage src={friend.avatar || ''} alt={friend.name} className="object-cover" />
                                   <AvatarFallback className="font-display font-bold text-muted-foreground">
-                                    {friend.name.charAt(0)}
+                                    {friend.name.trim().charAt(0).toUpperCase() || '?'}
                                   </AvatarFallback>
                                 </Avatar>
                                 <div>
@@ -1482,88 +1546,106 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                               </div>
                             </button>
                           ))}
-                        </div>
-                      ) : null}
 
-                      <div className="rounded-2xl border border-border bg-muted/25 p-4 space-y-3">
-                        <div className="flex gap-3">
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted">
-                            <UserPlus className="h-4 w-4 text-muted-foreground" aria-hidden />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-display font-semibold text-foreground">Add a friend</p>
-                            <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
-                              Find someone by Account ID or username. They must accept your friend request before you can
-                              invite them as judge.
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            inputMode="text"
-                            autoComplete="off"
-                            value={judgeByIdInput}
-                            onChange={(e) => {
-                              setJudgeByIdInput(e.target.value);
-                              setJudgeByIdError(null);
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') void searchJudgeByFriendId();
-                            }}
-                            placeholder="Account ID or username"
-                            className="min-w-0 flex-1 rounded-xl bg-background/60 px-3 py-2.5 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary [color-scheme:dark]"
-                          />
-                          <button
-                            type="button"
-                            disabled={judgeByIdSearching}
-                            onClick={() => void searchJudgeByFriendId()}
-                            className="shrink-0 rounded-xl bg-primary px-4 py-2.5 text-sm font-display font-bold text-primary-foreground disabled:opacity-50"
-                          >
-                            {judgeByIdSearching ? '…' : 'Find'}
-                          </button>
-                        </div>
-                        {judgeByIdError ? <p className="text-xs text-destructive">{judgeByIdError}</p> : null}
-                        {judgeByIdResult ? (
-                          <div className="flex items-center gap-3 rounded-xl border border-border bg-background/40 px-3 py-2.5">
-                            <Avatar className="h-10 w-10 shrink-0">
-                              <AvatarImage
-                                src={judgeByIdResult.avatar_url || ''}
-                                alt={judgeByIdResult.display_name || 'User'}
-                                className="object-cover"
-                              />
-                              <AvatarFallback className="font-display font-bold text-muted-foreground">
-                                {(judgeByIdResult.display_name || 'U').charAt(0)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate font-display font-semibold text-sm text-foreground">
-                                {judgeByIdResult.display_name || 'User'}
+                          {!showAddFriendPanel ? (
+                            <button
+                              type="button"
+                              aria-expanded={false}
+                              onClick={() => setShowAddFriendPanel(true)}
+                              className="w-full rounded-2xl border border-border bg-muted/25 p-3 text-left transition-colors hover:bg-muted/40"
+                            >
+                              <span className="inline-flex items-center gap-2 text-sm font-display font-semibold text-foreground">
+                                <UserPlus className="h-4 w-4 text-muted-foreground" aria-hidden />
+                                Add a friend
+                              </span>
+                            </button>
+                          ) : (
+                            <div
+                              ref={addFriendPanelRef}
+                              className="rounded-2xl border border-border bg-muted/25 p-4 space-y-3"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setShowAddFriendPanel(false)}
+                                className="inline-flex items-center gap-2 text-sm font-display font-semibold text-foreground hover:text-foreground/80"
+                              >
+                                <UserPlus className="h-4 w-4 text-muted-foreground" aria-hidden />
+                                Hide add a friend
+                              </button>
+                              <p className="text-[11px] text-muted-foreground leading-snug">
+                                Find someone by Account ID or username. They must accept your friend request before you can
+                                invite them as judge.
                               </p>
-                              {judgeByIdResult.friend_code ? (
-                                <p className="text-[11px] tabular-nums text-muted-foreground">{judgeByIdResult.friend_code}</p>
+                              <div className="flex gap-2">
+                                <input
+                                  ref={addFriendInputRef}
+                                  type="text"
+                                  inputMode="text"
+                                  autoComplete="off"
+                                  value={judgeByIdInput}
+                                  onChange={(e) => {
+                                    setJudgeByIdInput(e.target.value);
+                                    setJudgeByIdError(null);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') void searchJudgeByFriendId();
+                                  }}
+                                  placeholder="Account ID or username"
+                                  className="min-w-0 flex-1 rounded-xl bg-background/60 px-3 py-2.5 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary [color-scheme:dark]"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={judgeByIdSearching}
+                                  onClick={() => void searchJudgeByFriendId()}
+                                  className="shrink-0 rounded-xl bg-primary px-4 py-2.5 text-sm font-display font-bold text-primary-foreground disabled:opacity-50"
+                                >
+                                  {judgeByIdSearching ? '…' : 'Find'}
+                                </button>
+                              </div>
+                              {judgeByIdError ? <p className="text-xs text-destructive">{judgeByIdError}</p> : null}
+                              {judgeByIdResult ? (
+                                <div className="flex items-center gap-3 rounded-xl border border-border bg-background/40 px-3 py-2.5">
+                                  <Avatar className="h-10 w-10 shrink-0">
+                                    <AvatarImage
+                                      src={judgeByIdResult.avatar_url || ''}
+                                      alt={judgeByIdResult.display_name || 'User'}
+                                      className="object-cover"
+                                    />
+                                    <AvatarFallback className="font-display font-bold text-muted-foreground">
+                                      {(judgeByIdResult.display_name || 'U').trim().charAt(0).toUpperCase()}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate font-display font-semibold text-sm text-foreground">
+                                      {judgeByIdResult.display_name || 'User'}
+                                    </p>
+                                    {judgeByIdResult.friend_code ? (
+                                      <p className="text-[11px] tabular-nums text-muted-foreground">{judgeByIdResult.friend_code}</p>
+                                    ) : null}
+                                  </div>
+                                  {friends.some((f) => f.id === judgeByIdResult.id) ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => selectJudgeFromLookup(judgeByIdResult)}
+                                      className="shrink-0 rounded-lg bg-primary px-3 py-2 text-xs font-display font-bold text-primary-foreground"
+                                    >
+                                      {judge?.id === judgeByIdResult.id ? 'Selected' : 'Choose judge'}
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={judgeByIdSending}
+                                      onClick={() => void sendJudgeByIdFriendRequest()}
+                                      className="shrink-0 rounded-lg bg-emerald-500/90 px-3 py-2 text-xs font-display font-bold text-emerald-950 disabled:opacity-60"
+                                    >
+                                      {judgeByIdSending ? '…' : 'Send request'}
+                                    </button>
+                                  )}
+                                </div>
                               ) : null}
                             </div>
-                            {friends.some((f) => f.id === judgeByIdResult.id) ? (
-                              <button
-                                type="button"
-                                onClick={() => selectJudgeFromLookup(judgeByIdResult)}
-                                className="shrink-0 rounded-lg bg-primary px-3 py-2 text-xs font-display font-bold text-primary-foreground"
-                              >
-                                {judge?.id === judgeByIdResult.id ? 'Selected' : 'Choose judge'}
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                disabled={judgeByIdSending}
-                                onClick={() => void sendJudgeByIdFriendRequest()}
-                                className="shrink-0 rounded-lg bg-emerald-500/90 px-3 py-2 text-xs font-display font-bold text-emerald-950 disabled:opacity-60"
-                              >
-                                {judgeByIdSending ? '…' : 'Send request'}
-                              </button>
-                            )}
-                          </div>
-                        ) : null}
+                          )}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1602,7 +1684,11 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               {step === 3 && !tutorialCreateFlowActive && (
                 <div className="relative flex flex-col flex-1 min-h-0">
                   {cardStepSubmitting && (
-                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-2xl bg-background/95 px-6 backdrop-blur-[2px]">
+                    <div
+                      className="absolute inset-0 z-30 isolate flex flex-col items-center justify-center gap-3 rounded-2xl bg-background px-6"
+                      aria-busy="true"
+                      aria-live="polite"
+                    >
                       <div className="h-7 w-7 animate-spin rounded-full border-2 border-primary/30 border-t-primary" aria-hidden />
                       <p className="text-sm text-muted-foreground">Saving your card securely…</p>
                     </div>
@@ -1671,7 +1757,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     </div>
                     <div className="flex justify-between">
                       <span className="text-xs uppercase tracking-widest text-muted-foreground">Deadline</span>
-                      <span className="text-sm text-foreground tabular-nums">{new Date(deadline).toLocaleDateString()}</span>
+                      <span className="text-sm text-foreground tabular-nums">{deadlineDate?.toLocaleDateString()}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-xs uppercase tracking-widest text-muted-foreground">Stake</span>

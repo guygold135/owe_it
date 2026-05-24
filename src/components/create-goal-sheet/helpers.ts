@@ -8,6 +8,55 @@ const USD_BASE_PRESET_STAKES = [0, 10, 25, 50, 75, 100, 150, 200] as const;
 /** Minimum time between "now" and deadline (must be strictly after this window). */
 export const MIN_DEADLINE_LEAD_MS = 24 * 60 * 60 * 1000;
 
+const SHORT_DEADLINE_LEAD_MS = 60 * 1000;
+
+const DATETIME_LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+
+/** Parse `datetime-local` value as local wall time (never use `new Date(string)` — UTC quirks). */
+export function parseDatetimeLocal(value: string): Date | null {
+  const m = DATETIME_LOCAL_RE.exec(value.trim());
+  if (!m) return null;
+  const d = new Date(
+    Number(m[1]),
+    Number(m[2]) - 1,
+    Number(m[3]),
+    Number(m[4]),
+    Number(m[5]),
+    0,
+    0,
+  );
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Earliest minute selectable in `datetime-local` (strictly after the lead window). */
+export function getEarliestSelectableDeadline(allowShortDeadlines: boolean, now = Date.now()): Date {
+  const leadMs = allowShortDeadlines ? SHORT_DEADLINE_LEAD_MS : MIN_DEADLINE_LEAD_MS;
+  const boundaryMs = now + leadMs;
+  return new Date(Math.ceil((boundaryMs + 1) / 60_000) * 60_000);
+}
+
+export function getDefaultDeadlineDatetimeLocal(allowShortDeadlines: boolean, now = Date.now()): string {
+  return toDatetimeLocalString(getEarliestSelectableDeadline(allowShortDeadlines, now));
+}
+
+/** Force `datetime-local` value to be at or after the earliest allowed minute (native `min` is not reliable). */
+export function clampDeadlineDatetimeLocal(
+  value: string,
+  allowShortDeadlines: boolean,
+  now = Date.now(),
+): string {
+  const min = getEarliestSelectableDeadline(allowShortDeadlines, now);
+  const minStr = toDatetimeLocalString(min);
+  const trimmed = value.trim();
+  if (!trimmed) return minStr;
+  if (trimmed < minStr) return minStr;
+  const picked = parseDatetimeLocal(trimmed);
+  if (!picked || picked.getTime() < min.getTime()) {
+    return minStr;
+  }
+  return trimmed;
+}
+
 /** Large dot prefix for each requirement line (textarea). */
 export const REQUIREMENT_BULLET = '●';
 
@@ -26,7 +75,7 @@ export function getDeadlineValidationError(
   if (!deadlineDate || Number.isNaN(deadlineDate.getTime())) return 'Please set a valid deadline.';
   if (deadlineDate.getTime() <= now) return 'Choose a deadline in the future.';
   if (!allowShortDeadlines && deadlineDate.getTime() <= now + MIN_DEADLINE_LEAD_MS) {
-    return 'Deadline must be more than 1 day from now.';
+    return 'Deadline must be at least 24 hours from now.';
   }
   return null;
 }

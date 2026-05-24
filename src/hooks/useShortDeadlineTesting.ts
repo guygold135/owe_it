@@ -4,6 +4,7 @@ const SHORT_DEADLINE_TESTING_KEY = 'oweit_allow_short_deadlines';
 const SHORT_DEADLINE_TESTING_EVENT = 'oweit:allow-short-deadlines-changed';
 
 function readStoredValue(): boolean {
+  if (!import.meta.env.DEV) return false;
   try {
     return window.localStorage.getItem(SHORT_DEADLINE_TESTING_KEY) === '1';
   } catch {
@@ -34,9 +35,11 @@ export function useShortDeadlineTesting() {
   }, []);
 
   const setTestingEnabled = (next: boolean) => {
-    setEnabled(next);
+    const resolved = import.meta.env.DEV ? next : false;
+    setEnabled(resolved);
+    if (!import.meta.env.DEV) return;
     try {
-      window.localStorage.setItem(SHORT_DEADLINE_TESTING_KEY, next ? '1' : '0');
+      window.localStorage.setItem(SHORT_DEADLINE_TESTING_KEY, resolved ? '1' : '0');
     } catch {
       // Ignore storage failures.
     }

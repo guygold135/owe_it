@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronRight, Lock, ShieldCheck } from 'lucide-react';
+import { ChevronRight, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatStakeAmount } from '@/lib/currency';
 import { supabase } from '@/integrations/supabase/client';
@@ -145,21 +145,22 @@ export function CardStepFields({
   }, [onDropinReady, onCardFieldsCompleteChange]);
 
   const showLoading = loadingToken || (clientToken && !formReady);
+  const obscureForm = showLoading || Boolean(hideContent);
 
   return (
-    <div className="relative flex flex-1 min-h-0 flex-col gap-4">
+    <div className="relative flex flex-1 min-h-0 flex-col gap-3">
       {!hideContent && !showLoading && stake > 0 && (
-        <div className="shrink-0 overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-muted/50 via-muted/25 to-transparent p-4">
-          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+        <div className="shrink-0 overflow-hidden rounded-xl border border-border/70 bg-gradient-to-br from-muted/50 via-muted/25 to-transparent p-3">
+          <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
             Stake on the line
           </p>
-          <div className="mt-1 flex items-center gap-3">
-            <ShieldCheck className="h-8 w-8 shrink-0 text-primary" aria-hidden />
-            <p className="font-display text-3xl font-extrabold tabular-nums text-primary">
+          <div className="mt-0.5 flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 shrink-0 text-primary" aria-hidden />
+            <p className="font-display text-2xl font-extrabold tabular-nums leading-none text-primary">
               {formatStakeAmount(stake, stakeCurrency)}
             </p>
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-1.5 text-xs leading-snug text-muted-foreground">
             Your card is charged only if you don&apos;t complete your goal by the deadline.
           </p>
         </div>
@@ -172,13 +173,15 @@ export function CardStepFields({
           </p>
         )}
         {clientToken && !tokenError && (
-          <BraintreeHostedCardForm
-            key={`${clientToken}-${formKey}`}
-            clientToken={clientToken}
-            onReady={handleReady}
-            onError={handleFormError}
-            onFieldsCompleteChange={onCardFieldsCompleteChange}
-          />
+          <div className={obscureForm ? 'invisible' : undefined} aria-hidden={obscureForm}>
+            <BraintreeHostedCardForm
+              key={`${clientToken}-${formKey}`}
+              clientToken={clientToken}
+              onReady={handleReady}
+              onError={handleFormError}
+              onFieldsCompleteChange={onCardFieldsCompleteChange}
+            />
+          </div>
         )}
         {clientToken && !formReady && !loadingToken && !tokenError && (
           <button
@@ -195,15 +198,12 @@ export function CardStepFields({
         )}
       </div>
 
-      {!hideContent && !showLoading && (
-        <p className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
-          <Lock className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
-          Encrypted · PCI compliant
-        </p>
-      )}
-
       {showLoading && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-2xl bg-background/95 px-6 backdrop-blur-[2px]">
+        <div
+          className="absolute inset-0 z-30 isolate flex flex-col items-center justify-center gap-3 rounded-2xl bg-background px-6"
+          aria-busy="true"
+          aria-live="polite"
+        >
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary/25 border-t-primary" aria-hidden />
           <p className="text-sm text-muted-foreground">Preparing secure checkout…</p>
         </div>

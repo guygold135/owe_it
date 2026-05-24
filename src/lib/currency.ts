@@ -188,12 +188,16 @@ function stakeCurrencySymbol(currency: StakeCurrency): string {
   return currency.toUpperCase();
 }
 
+/** Consistent stake display app-wide (`$50`, `0$`) — not device-locale variants like `50 US$`. */
 export function formatStakeAmount(amount: number, currency: string): string {
   const safeAmount = Number.isFinite(amount) ? amount : 0;
   const normalized = normalizeStakeCurrency(currency);
   const roundedCents = Math.round(safeAmount * 100);
+  if (roundedCents === 0) {
+    return `0${stakeCurrencySymbol(normalized)}`;
+  }
   const hasCents = roundedCents % 100 !== 0;
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: normalized.toUpperCase(),
     minimumFractionDigits: hasCents ? 2 : 0,
@@ -201,14 +205,9 @@ export function formatStakeAmount(amount: number, currency: string): string {
   }).format(safeAmount);
 }
 
-/** Dashboard “At Risk” zero — avoids locale suffixes like `0 US$` on iPhone. */
+/** @deprecated Use {@link formatStakeAmount} — kept for call-site compatibility. */
 export function formatStakeAmountAtRisk(amount: number, currency: string): string {
-  const safeAmount = Number.isFinite(amount) ? amount : 0;
-  const normalized = normalizeStakeCurrency(currency);
-  if (Math.round(safeAmount * 100) === 0) {
-    return `0${stakeCurrencySymbol(normalized)}`;
-  }
-  return formatStakeAmount(safeAmount, currency);
+  return formatStakeAmount(amount, currency);
 }
 
 export function convertStakeAmount(amount: number, fromCurrency: string, toCurrency: string): number {

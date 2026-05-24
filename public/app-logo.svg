@@ -1,14 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Owe It">
   <defs>
+    <clipPath id="rounded-corners">
+      <rect width="512" height="512" rx="149" ry="149" />
+    </clipPath>
     <filter id="layer-shadow" x="-30%" y="-30%" width="160%" height="160%">
       <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000000" flood-opacity="0.38" />
     </filter>
   </defs>
-  <rect width="512" height="512" fill="#1e212b" />
-  <g filter="url(#layer-shadow)">
-    <circle cx="256" cy="256" r="198" fill="#233f2e" />
-    <circle cx="256" cy="256" r="152" fill="#2e7247" />
-    <circle cx="256" cy="256" r="108" fill="#39a860" />
-    <circle cx="256" cy="256" r="64" fill="#49de80" />
+  <g clip-path="url(#rounded-corners)">
+    <rect width="512" height="512" fill="#1e212b" />
+    <g filter="url(#layer-shadow)">
+      <circle cx="256" cy="256" r="198" fill="#233f2e" />
+      <circle cx="256" cy="256" r="152" fill="#2e7247" />
+      <circle cx="256" cy="256" r="108" fill="#39a860" />
+      <circle cx="256" cy="256" r="64" fill="#49de80" />
+    </g>
   </g>
 </svg>

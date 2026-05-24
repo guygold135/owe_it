@@ -32,8 +32,8 @@ export function PaymentMethodConsentNotice({
         className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         aria-describedby={`${inputId}-description`}
       />
-      <span id={`${inputId}-description`} className="text-xs leading-relaxed text-muted-foreground">
-        By saving your payment method, you agree to our{' '}
+      <span id={`${inputId}-description`} className="text-xs leading-snug text-muted-foreground">
+        I agree to the{' '}
         <Link
           to="/terms"
           target="_blank"
@@ -53,8 +53,9 @@ export function PaymentMethodConsentNotice({
         >
           Privacy Policy
         </Link>
-        , and authorize Owe It and its payment processors to securely store your payment credentials
-        for future charges based on your goal outcomes, as described in those Terms.
+        {' '}
+        and authorize Owe It and its payment processors to store and charge my payment method for goal
+        outcomes, as described in those Terms.
       </span>
     </label>
   );

@@ -150,17 +150,14 @@ export function CardStepFields({
   return (
     <div className="relative flex flex-1 min-h-0 flex-col gap-3">
       {!hideContent && !showLoading && stake > 0 && (
-        <div className="shrink-0 overflow-hidden rounded-xl border border-border/70 bg-gradient-to-br from-muted/50 via-muted/25 to-transparent p-3">
-          <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-            Stake on the line
-          </p>
-          <div className="mt-0.5 flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 shrink-0 text-primary" aria-hidden />
-            <p className="font-display text-2xl font-extrabold tabular-nums leading-none text-primary">
+        <div className="shrink-0 overflow-hidden rounded-lg border border-border/70 bg-gradient-to-br from-muted/50 via-muted/25 to-transparent px-2.5 py-2">
+          <div className="flex items-center gap-1.5">
+            <ShieldCheck className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+            <p className="font-display text-xl font-extrabold tabular-nums leading-none text-primary">
               {formatStakeAmount(stake, stakeCurrency)}
             </p>
           </div>
-          <p className="mt-1.5 text-xs leading-snug text-muted-foreground">
+          <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
             Your card is charged only if you don&apos;t complete your goal by the deadline.
           </p>
         </div>

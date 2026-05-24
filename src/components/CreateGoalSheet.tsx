@@ -467,6 +467,15 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
 
   const normalizedJudgeLookup = useMemo(() => judgeByIdInput.trim(), [judgeByIdInput]);
 
+  const customStakeBelowMinimum = useMemo(() => {
+    if (customStakeError) return false;
+    const raw = customStakeInput.trim();
+    if (raw === '') return false;
+    const num = Number(raw);
+    if (!Number.isFinite(num)) return false;
+    return num > 0 && num < minimumStake;
+  }, [customStakeInput, customStakeError, minimumStake]);
+
   const searchJudgeByFriendId = useCallback(async () => {
     setJudgeByIdError(null);
     setJudgeByIdResult(null);
@@ -756,7 +765,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       return title.length > 0 && deadline.length > 0 && !duplicateActiveTitle && !deadlineIssue;
     }
     if (step === 1) {
-      if (customStakeInput.trim() !== '' && customStakeError) return false;
+      if (customStakeInput.trim() !== '' && (customStakeError || customStakeBelowMinimum)) return false;
       return true;
     }
     if (step === 2) return judge !== null; // Judge step
@@ -1441,21 +1450,23 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                           );
                         }}
                         className={`flex-1 bg-muted rounded-xl px-3 py-2 text-sm text-foreground font-display font-semibold tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 [color-scheme:dark] border ${
-                          customStakeError ? 'border-destructive ring-destructive' : 'border-transparent focus:ring-primary'
+                          customStakeError || customStakeBelowMinimum
+                            ? 'border-destructive ring-destructive'
+                            : 'border-transparent focus:ring-primary'
                         } ${tutorialCreateFlowActive ? 'opacity-60 cursor-not-allowed' : ''}`}
                       />
                     </div>
                     <div className="space-y-1 text-[11px] text-muted-foreground leading-snug">
-                      <p>Minimum paid stake: {formatStakeAmount(minimumStake, stakeCurrency)}.</p>
+                      {customStakeBelowMinimum ? (
+                        <p className="text-destructive">
+                          Min. paid stake: {formatStakeAmount(minimumStake, stakeCurrency)}.
+                        </p>
+                      ) : null}
                       <p>
-                        Only if the stake is charged, the combined payment processing and app fee is{' '}
-                        <span className="text-foreground/90">6.7%</span>. The rest is transferred to the charity
-                        you selected.
+                        If charged, the combined fee is <span className="text-foreground/90">6.7%</span>; the rest
+                        goes to your charity.
                       </p>
-                      <p>
-                        If your card is billed in another currency, your bank may charge a separate conversion fee we do
-                        not control.
-                      </p>
+                      <p>Card billed in another currency? Your bank may charge conversion fees we don&apos;t control.</p>
                     </div>
                   </div>
                 </div>

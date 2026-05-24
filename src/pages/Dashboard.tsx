@@ -1091,7 +1091,7 @@ export default function Dashboard() {
             transition={{ delay: 0.1 }}
             className="mt-2 pr-4 text-base sm:text-xl font-display font-extrabold leading-snug tracking-tight text-balance text-foreground"
           >
-            <span className="block whitespace-nowrap">Let us decide which charity.</span>
+            <span className="block whitespace-nowrap">Win for yourself or give for a cause.</span>
             <span className="block whitespace-nowrap">Either way, something good happens.</span>
           </motion.h1>
         </div>

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider, useIsFetching } from "@tanstack/react-query";
 import { Capacitor } from '@capacitor/core';
-import { BrowserRouter, HashRouter, Route, Routes, Navigate } from "react-router-dom";
+import { BrowserRouter, HashRouter, Route, Routes, Navigate, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -118,8 +118,20 @@ function DelayedRouteFallback() {
 
 const SESSION_SPLASH_KEY = 'owe_it_session_logo_splash_seen_v1';
 
+/** Keep query + hash when sending logged-out users to /auth (magic links). */
+function RedirectToAuth() {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={{ pathname: '/auth', search: location.search, hash: location.hash }}
+      replace
+    />
+  );
+}
+
 function AppRoutes() {
   const { user, loading, passwordRecoveryPending } = useAuth();
+  usePendingJudgeInviteRedirect();
   const [createOpen, setCreateOpen] = useState(false);
   /** First visit in this tab: true immediately so we never flash another UI before the logo (see timers in effect). */
   const [showSessionSplash, setShowSessionSplash] = useState(() =>
@@ -162,7 +174,7 @@ function AppRoutes() {
             <Route path="/judge-invite/:requestId" element={<JudgeInviteAccept />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
-            <Route path="*" element={<Navigate to="/auth" replace />} />
+            <Route path="*" element={<RedirectToAuth />} />
           </Routes>
         </Suspense>
       </div>
@@ -194,7 +206,6 @@ function LoggedInAppShell({
 }) {
   const { user } = useAuth();
   const { phase, tutorialBootBlocking, fabSpotlight, onFabPhaseCreateOpened, highlightNavTab } = useAppTutorial();
-  usePendingJudgeInviteRedirect();
   const [resumeJudgeRequestId, setResumeJudgeRequestId] = useState<string | null>(null);
   const isFetching = useIsFetching();
   const [showShellSplash, setShowShellSplash] = useState(() =>

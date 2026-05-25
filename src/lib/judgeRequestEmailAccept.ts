@@ -3,6 +3,18 @@ export const JUDGE_INVITE_REQUEST_QUERY_PARAM = 'judgeInviteRequestId';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** Supabase magic links put tokens in the hash — wait before sending the user to /auth. */
+export function urlHasAuthCallbackHash(): boolean {
+  if (typeof window === 'undefined') return false;
+  const hash = window.location.hash;
+  return (
+    hash.includes('access_token=') ||
+    hash.includes('refresh_token=') ||
+    hash.includes('type=magiclink') ||
+    hash.includes('type=signup')
+  );
+}
+
 export function storePendingJudgeAccept(requestId: string): void {
   if (typeof window === 'undefined' || !requestId.trim()) return;
   try {

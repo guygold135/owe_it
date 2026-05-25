@@ -92,8 +92,10 @@ In Supabase Dashboard:
 - Add production site URL + redirect URLs
 
 Recommended redirect URLs include:
+- `https://YOUR_DOMAIN/**`
 - `https://YOUR_DOMAIN/`
 - `https://YOUR_DOMAIN/auth`
+- `https://YOUR_DOMAIN/judge-invite/**`
 
 ---
 

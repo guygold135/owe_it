@@ -4,7 +4,7 @@ import { Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
-import { storePendingJudgeAccept } from '@/lib/judgeRequestEmailAccept';
+import { storePendingJudgeAccept, urlHasAuthCallbackHash } from '@/lib/judgeRequestEmailAccept';
 import { notifyRequesterJudgeAccepted } from '@/lib/notifyJudgeAcceptedEmail';
 import { APP_LOGO_SRC } from '@/lib/brandAssets';
 
@@ -24,7 +24,7 @@ export default function JudgeInviteAccept() {
       setErrorMessage('This invite link is invalid.');
       return;
     }
-    if (loading) return;
+    if (loading || (!user && urlHasAuthCallbackHash())) return;
 
     if (!user) {
       storePendingJudgeAccept(requestId);

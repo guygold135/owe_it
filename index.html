@@ -130,6 +130,38 @@
         <p class="boot-loading-label">Loading</p>
       </div>
     </div>
+    <script>
+      (function () {
+        try {
+          var key = 'oweit:pending-judge-accept';
+          var param = 'judgeInviteRequestId';
+          var uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          function store(id) {
+            if (id && uuidRe.test(id)) sessionStorage.setItem(key, id);
+          }
+          var search = new URLSearchParams(window.location.search);
+          if (search.get(param)) {
+            store(search.get(param));
+            return;
+          }
+          var pathMatch = window.location.pathname.match(/\/judge-invite\/([^/]+)/i);
+          if (pathMatch) {
+            store(pathMatch[1]);
+            return;
+          }
+          var hash = window.location.hash.replace(/^#/, '');
+          if (hash.indexOf('?') >= 0) {
+            var hashParams = new URLSearchParams(hash.slice(hash.indexOf('?') + 1));
+            if (hashParams.get(param)) {
+              store(hashParams.get(param));
+              return;
+            }
+          }
+          var hashPathMatch = hash.match(/^\/?judge-invite\/([^/?]+)/i);
+          if (hashPathMatch) store(hashPathMatch[1]);
+        } catch (e) {}
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

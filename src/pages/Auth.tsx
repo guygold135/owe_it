@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { consumeAuthRedirectError } from '@/lib/sessionBootstrap';
+import { captureJudgeInviteFromUrl } from '@/lib/judgeRequestEmailAccept';
 import { APP_LOGO_SRC } from '@/lib/brandAssets';
 import { isElevenDigitDisplayName } from '@/lib/displayName';
 import { SmokeBackground } from '@/components/ui/spooky-smoke-animation';
@@ -55,6 +56,7 @@ export default function Auth() {
   const [resendConfirmBusy, setResendConfirmBusy] = useState(false);
 
   useEffect(() => {
+    captureJudgeInviteFromUrl();
     const redirectErr = consumeAuthRedirectError();
     if (redirectErr) {
       const desc = redirectErr.errorDescription

@@ -82,31 +82,38 @@ function buildJudgeInviteEmailHtml(params: {
   ].join("");
 }
 
-function buildJudgeInviteLandingUrl(appUrl: string, judgeRequestId: string): string {
+function buildJudgeInviteAuthRedirectUrl(appUrl: string, judgeRequestId: string): string {
   const base = appUrl.replace(/\/$/, "");
-  return `${base}/?judgeInviteRequestId=${encodeURIComponent(judgeRequestId)}`;
+  return `${base}/auth?judgeInviteRequestId=${encodeURIComponent(judgeRequestId)}`;
+}
+
+function buildJudgeInvitePathUrl(appUrl: string, judgeRequestId: string): string {
+  return `${appUrl.replace(/\/$/, "")}/judge-invite/${judgeRequestId}`;
 }
 
 async function resolveAcceptUrl(
   supabaseAdmin: ReturnType<typeof createClient>,
   judgeEmail: string,
-  invitePageUrl: string,
+  redirectCandidates: string[],
+  directFallbackUrl: string,
 ): Promise<{ acceptUrl: string; usesMagicLink: boolean }> {
-  const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
-    type: "magiclink",
-    email: judgeEmail,
-    options: { redirectTo: invitePageUrl },
-  });
+  for (const redirectTo of redirectCandidates) {
+    const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+      type: "magiclink",
+      email: judgeEmail,
+      options: { redirectTo },
+    });
 
-  if (!linkError && linkData?.properties?.action_link) {
-    return { acceptUrl: linkData.properties.action_link, usesMagicLink: true };
+    if (!linkError && linkData?.properties?.action_link) {
+      return { acceptUrl: linkData.properties.action_link, usesMagicLink: true };
+    }
+
+    if (linkError) {
+      console.warn("notify-judge-request generateLink fallback:", linkError.message, redirectTo);
+    }
   }
 
-  if (linkError) {
-    console.warn("notify-judge-request generateLink fallback:", linkError.message);
-  }
-
-  return { acceptUrl: invitePageUrl, usesMagicLink: false };
+  return { acceptUrl: directFallbackUrl, usesMagicLink: false };
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -192,8 +199,15 @@ serve(async (req: Request): Promise<Response> => {
     const payload = (judgeRequest.goal_payload ?? null) as Record<string, unknown> | null;
     const { title, deadlineLine, stakeLine } = goalPayloadSummary(payload);
 
-    const inviteLandingUrl = buildJudgeInviteLandingUrl(resolveAppUrl(req), judgeRequestId);
-    const { acceptUrl, usesMagicLink } = await resolveAcceptUrl(supabaseAdmin, judgeEmail, inviteLandingUrl);
+    const appUrl = resolveAppUrl(req);
+    const authRedirectUrl = buildJudgeInviteAuthRedirectUrl(appUrl, judgeRequestId);
+    const pathUrl = buildJudgeInvitePathUrl(appUrl, judgeRequestId);
+    const { acceptUrl, usesMagicLink } = await resolveAcceptUrl(
+      supabaseAdmin,
+      judgeEmail,
+      [authRedirectUrl, pathUrl],
+      pathUrl,
+    );
 
     if (!resendApiKey) {
       return jsonResponse({ emailed: false, reason: "email_not_configured" }, corsHeaders, 200);

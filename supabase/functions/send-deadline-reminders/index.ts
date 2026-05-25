@@ -5,6 +5,7 @@ import { getResendFromAddress } from "../_shared/resendFrom.ts";
 import {
   buildDeadlineReminderEmailHtml,
   deadlineReminderBodyText,
+  deadlineReminderHeadline,
   deadlineReminderSubject,
   escapeHtml,
   type DeadlineReminderThreshold,
@@ -54,13 +55,6 @@ function resolveAppUrl(): string {
   const configured = Deno.env.get("APP_URL")?.trim();
   if (configured) return configured.replace(/\/$/, "");
   return "https://oweit.site";
-}
-
-function inAppTitle(threshold: DeadlineReminderThreshold, role: "owner" | "judge"): string {
-  if (threshold === "6h") {
-    return role === "judge" ? "Urgent — judging soon" : "Urgent — under 6 hours";
-  }
-  return role === "judge" ? "Goal due in under 24 hours" : "Deadline in under 24 hours";
 }
 
 function inAppKind(threshold: DeadlineReminderThreshold): string {
@@ -188,11 +182,29 @@ async function processGoalReminders(
     return email;
   };
 
+  const displayNameCache = new Map<string, string>();
+  const getOwnerDisplayName = async (userId: string): Promise<string> => {
+    if (displayNameCache.has(userId)) return displayNameCache.get(userId)!;
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("display_name")
+      .eq("id", userId)
+      .maybeSingle();
+    if (error) {
+      console.warn(`send-deadline-reminders profile ${userId}:`, error.message);
+    }
+    const name = String((data as { display_name?: string | null } | null)?.display_name ?? "").trim() ||
+      "Someone";
+    displayNameCache.set(userId, name);
+    return name;
+  };
+
   for (const goal of goalList) {
     const msLeft = new Date(goal.deadline).getTime() - now;
     if (msLeft <= 0) continue;
 
     const selfJudged = !goal.judge_user_id || goal.judge_user_id === goal.user_id;
+    const ownerDisplayName = await getOwnerDisplayName(goal.user_id);
     const deadlineLine = escapeHtml(new Date(goal.deadline).toLocaleString());
     const stakeLine = escapeHtml(formatStakeLine(goal.stake));
     const goalTitle = String(goal.title ?? "Goal").trim() || "Goal";
@@ -211,7 +223,13 @@ async function processGoalReminders(
       const kind = inAppKind(threshold);
 
       if (!existing) {
-        const ownerBody = deadlineReminderBodyText(threshold, goalTitle, "owner", selfJudged);
+        const ownerBody = deadlineReminderBodyText(
+          threshold,
+          goalTitle,
+          "owner",
+          selfJudged,
+          ownerDisplayName,
+        );
         const notifications: {
           user_id: string;
           kind: string;
@@ -222,7 +240,7 @@ async function processGoalReminders(
           {
             user_id: goal.user_id,
             kind,
-            title: inAppTitle(threshold, "owner"),
+            title: deadlineReminderHeadline(threshold, "owner"),
             body: ownerBody,
             goal_id: goal.id,
           },
@@ -232,8 +250,14 @@ async function processGoalReminders(
           notifications.push({
             user_id: goal.judge_user_id,
             kind,
-            title: threshold === "6h" ? "Urgent — judging soon" : "Goal due in under 24 hours",
-            body: deadlineReminderBodyText(threshold, goalTitle, "judge", false),
+            title: deadlineReminderHeadline(threshold, "judge"),
+            body: deadlineReminderBodyText(
+              threshold,
+              goalTitle,
+              "judge",
+              false,
+              ownerDisplayName,
+            ),
             goal_id: goal.id,
           });
         }
@@ -277,8 +301,14 @@ async function processGoalReminders(
         emailsAttempted += 1;
         const pageUrl = `${appUrl}${recipient.pagePath}`;
         const openUrl = await resolveOpenUrl(supabase, email, pageUrl);
-        const bodyText = deadlineReminderBodyText(threshold, goalTitle, recipient.role, selfJudged);
-        const headline = inAppTitle(threshold, recipient.role);
+        const bodyText = deadlineReminderBodyText(
+          threshold,
+          goalTitle,
+          recipient.role,
+          selfJudged,
+          ownerDisplayName,
+        );
+        const headline = deadlineReminderHeadline(threshold, recipient.role);
         const html = buildDeadlineReminderEmailHtml({
           headline,
           bodyText,
@@ -286,11 +316,12 @@ async function processGoalReminders(
           deadlineLine,
           stakeLine,
           openUrl,
+          showAlertIcon: recipient.role === "judge",
         });
 
         const sendResult = await sendResendEmail({
           to: email,
-          subject: deadlineReminderSubject(threshold, goalTitle, recipient.role),
+          subject: deadlineReminderSubject(threshold, goalTitle, recipient.role, ownerDisplayName),
           html,
         });
 

@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Users } from 'lucide-react';
-import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
+import { ensureJudgeInviteAccepted } from '@/lib/acceptJudgeInviteRequest';
 import { storePendingJudgeAccept, urlHasAuthCallbackHash } from '@/lib/judgeRequestEmailAccept';
-import { notifyRequesterJudgeAccepted } from '@/lib/notifyJudgeAcceptedEmail';
 import { APP_LOGO_SRC } from '@/lib/brandAssets';
 
 type Phase = 'waiting-auth' | 'accepting' | 'done' | 'error';
@@ -36,15 +34,14 @@ export default function JudgeInviteAccept() {
     acceptStartedRef.current = true;
     setPhase('accepting');
 
-    void supabase.rpc('accept_judge_request', { p_request_id: requestId }).then(({ error }) => {
-      if (error) {
+    void ensureJudgeInviteAccepted(requestId).then((ok) => {
+      if (!ok) {
         setPhase('error');
-        setErrorMessage(error.message ?? 'Could not accept this judge request.');
+        setErrorMessage('Could not accept this judge request.');
+        acceptStartedRef.current = false;
         return;
       }
       setPhase('done');
-      toast.success('You accepted the judge request.');
-      void notifyRequesterJudgeAccepted(requestId);
       window.setTimeout(() => navigate('/', { replace: true }), 1200);
     });
   }, [requestId, user, loading, navigate]);

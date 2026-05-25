@@ -82,6 +82,11 @@ function buildJudgeInviteEmailHtml(params: {
   ].join("");
 }
 
+function buildJudgeInviteLandingUrl(appUrl: string, judgeRequestId: string): string {
+  const base = appUrl.replace(/\/$/, "");
+  return `${base}/?judgeInviteRequestId=${encodeURIComponent(judgeRequestId)}`;
+}
+
 async function resolveAcceptUrl(
   supabaseAdmin: ReturnType<typeof createClient>,
   judgeEmail: string,
@@ -187,8 +192,8 @@ serve(async (req: Request): Promise<Response> => {
     const payload = (judgeRequest.goal_payload ?? null) as Record<string, unknown> | null;
     const { title, deadlineLine, stakeLine } = goalPayloadSummary(payload);
 
-    const invitePageUrl = `${resolveAppUrl(req)}/judge-invite/${judgeRequestId}`;
-    const { acceptUrl, usesMagicLink } = await resolveAcceptUrl(supabaseAdmin, judgeEmail, invitePageUrl);
+    const inviteLandingUrl = buildJudgeInviteLandingUrl(resolveAppUrl(req), judgeRequestId);
+    const { acceptUrl, usesMagicLink } = await resolveAcceptUrl(supabaseAdmin, judgeEmail, inviteLandingUrl);
 
     if (!resendApiKey) {
       return jsonResponse({ emailed: false, reason: "email_not_configured" }, corsHeaders, 200);

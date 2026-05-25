@@ -1,6 +1,8 @@
 /** ISO time at first module load (before React). Pending judge requests older than this are abandoned after refresh. */
 export const SESSION_BOOTSTRAP_AT_ISO = new Date().toISOString();
 
+import '@/lib/judgeRequestEmailAccept';
+
 /**
  * Supabase clears `window.location.hash` during auth client init before React runs.
  * We persist recovery intent here (imported in main.tsx before App → before createClient).

@@ -3,7 +3,8 @@ import { toast } from 'sonner';
 import { Users } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { peekWatchingJudgeRequest } from '@/lib/pendingGoalResume';
+import { peekWatchingJudgeRequest, setWatchingJudgeRequest, clearWatchingJudgeRequest } from '@/lib/pendingGoalResume';
+import { dismissJudgeAcceptedNotice, judgeAcceptedToastId } from '@/lib/judgeAcceptedNotice';
 
 const RESUME_EVENT = 'oweit:resume-goal-request';
 
@@ -37,7 +38,7 @@ export function JudgeAcceptedNoticeHost() {
       seenRef.current.add(row.id);
 
       toast.success(row.title ?? 'Judge accepted your request', {
-        id: `judge_request_accepted_${row.id}`,
+        id: judgeAcceptedToastId(requestId),
         description: row.body,
         duration: Number.POSITIVE_INFINITY,
         closeButton: true,
@@ -45,20 +46,13 @@ export function JudgeAcceptedNoticeHost() {
         action: {
           label: 'Continue setup',
           onClick: () => {
+            setWatchingJudgeRequest(requestId);
             dispatchResumeGoalRequest(requestId);
-            void supabase
-              .from('in_app_notifications')
-              .update({ read_at: new Date().toISOString() })
-              .eq('id', row.id)
-              .eq('user_id', userId);
           },
         },
         onDismiss: () => {
-          void supabase
-            .from('in_app_notifications')
-            .update({ read_at: new Date().toISOString() })
-            .eq('id', row.id)
-            .eq('user_id', userId);
+          clearWatchingJudgeRequest();
+          void dismissJudgeAcceptedNotice(userId, requestId);
         },
       });
     };

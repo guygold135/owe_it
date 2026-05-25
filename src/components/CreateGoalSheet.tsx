@@ -53,11 +53,13 @@ import {
 } from '@/components/create-goal-sheet/helpers';
 import { notifyJudgeRequestByEmail } from '@/lib/notifyJudgeRequestEmail';
 import {
+  clearPendingGoalResume,
   clearWatchingJudgeRequest,
   parseGoalDraftPayload,
   setWatchingJudgeRequest,
   storePendingGoalResume,
 } from '@/lib/pendingGoalResume';
+import { dismissJudgeAcceptedNotice } from '@/lib/judgeAcceptedNotice';
 import { CardStepContinueButton, CardStepFields } from '@/components/create-goal-sheet/CardStep';
 import { PaymentMethodConsentNotice } from '@/components/PaymentMethodConsentNotice';
 import {
@@ -227,6 +229,7 @@ export function CreateGoalSheet({
   const judgeRequestRowSeenRef = useRef(false);
   const stakeRef = useRef(stake);
   const createdGoalIdRef = useRef<string | null>(null);
+  const resumedJudgeRequestIdRef = useRef<string | null>(null);
   const preserveDraftOnNextCloseRef = useRef(false);
   /** judge-wait dialog: full sheet close (X/backdrop) vs return to judge picker (Back button) */
   const judgeWaitDismissRef = useRef<'sheet' | 'back-to-picker'>('sheet');
@@ -247,17 +250,22 @@ export function CreateGoalSheet({
   }, [judgeRequestId]);
 
   useEffect(() => {
-    if (open && judgeRequestId) {
-      setWatchingJudgeRequest(judgeRequestId);
+    if (!open) {
+      clearWatchingJudgeRequest();
+      return;
+    }
+    const watchId = judgeRequestId ?? resumedJudgeRequestIdRef.current;
+    if (watchId) {
+      setWatchingJudgeRequest(watchId);
       return () => clearWatchingJudgeRequest();
     }
-    clearWatchingJudgeRequest();
-  }, [open, judgeRequestId]);
+  }, [open, judgeRequestId, resumeJudgeRequestId, step]);
 
   useEffect(() => {
     if (!open || !resumeJudgeRequestId || !user?.id) return;
 
     let cancelled = false;
+    resumedJudgeRequestIdRef.current = null;
     void (async () => {
       const { data, error } = await supabase
         .from('judge_requests')
@@ -320,6 +328,8 @@ export function CreateGoalSheet({
       }
 
       if (!cancelled) {
+        resumedJudgeRequestIdRef.current = resumeJudgeRequestId;
+        setWatchingJudgeRequest(resumeJudgeRequestId);
         setStep(resolvedStake > 0 ? 3 : 4);
         onResumeHandled?.();
       }
@@ -1918,13 +1928,13 @@ export function CreateGoalSheet({
                     <button
                       type="button"
                       onClick={() => setConfirmEditing((v) => !v)}
-                      className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
+                      className="absolute right-6 top-3 flex h-5 w-5 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
                       aria-label={confirmEditing ? 'Done editing goal details' : 'Edit goal title and deadline'}
                       aria-pressed={confirmEditing}
                     >
                       <Pencil className="h-4 w-4" />
                     </button>
-                    <div className="flex justify-between gap-8 pr-10">
+                    <div className="flex justify-between gap-8">
                       <span className="text-xs uppercase tracking-widest text-muted-foreground shrink-0">Goal</span>
                       {confirmEditing ? (
                         <input
@@ -1932,7 +1942,7 @@ export function CreateGoalSheet({
                           type="text"
                           value={title}
                           onChange={(e) => setTitle(e.target.value)}
-                          className="min-w-0 flex-1 rounded-lg bg-background px-2 py-1 text-right text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                          className="min-w-0 max-w-[min(100%,14rem)] rounded-lg bg-background px-2 py-1 text-right text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                         />
                       ) : (
                         <span className="text-sm text-foreground font-medium truncate">{title}</span>
@@ -2054,6 +2064,13 @@ export function CreateGoalSheet({
                       }}
                       onPublish={performSign}
                       onSuccess={() => {
+                        const resumedId = resumedJudgeRequestIdRef.current;
+                        if (resumedId && user?.id) {
+                          void dismissJudgeAcceptedNotice(user.id, resumedId);
+                          clearPendingGoalResume();
+                          clearWatchingJudgeRequest();
+                          resumedJudgeRequestIdRef.current = null;
+                        }
                         if (tutorialActive && isAppTutorialSheetPhase(tutorialPhase)) {
                           preserveDraftOnNextCloseRef.current = true;
                           onGoalCreatedInTutorial(createdGoalIdRef.current);

@@ -196,16 +196,19 @@ export type Database = {
       }
       goal_deadline_reminder_sent: {
         Row: {
+          email_sent_at: string | null
           goal_id: string
           threshold: string
           sent_at: string
         }
         Insert: {
+          email_sent_at?: string | null
           goal_id: string
           threshold: string
           sent_at?: string
         }
         Update: {
+          email_sent_at?: string | null
           goal_id?: string
           threshold?: string
           sent_at?: string

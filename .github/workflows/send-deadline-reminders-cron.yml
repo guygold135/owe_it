@@ -1,0 +1,26 @@
+name: Send deadline reminder emails (cron)
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  send-deadline-reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Supabase deadline reminder function
+        env:
+          REMINDER_URL: https://lngepgvviuqanzlslqhf.supabase.co/functions/v1/send-deadline-reminders
+          AUTO_EXPIRE_CRON_SECRET: ${{ secrets.AUTO_EXPIRE_CRON_SECRET }}
+        run: |
+          if [ -z "$AUTO_EXPIRE_CRON_SECRET" ]; then
+            echo "Missing GitHub secret AUTO_EXPIRE_CRON_SECRET"
+            exit 1
+          fi
+
+          curl --fail-with-body \
+            -X POST "$REMINDER_URL" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: $AUTO_EXPIRE_CRON_SECRET" \
+            -d '{}'

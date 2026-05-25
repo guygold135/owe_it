@@ -14,6 +14,7 @@ import {
   clearPendingPasswordRecoveryFlag,
   hasPendingPasswordRecoveryFlag,
 } from '@/lib/sessionBootstrap';
+import { runJudgeInviteAutoAccept } from '@/lib/acceptJudgeInviteRequest';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { isElevenDigitDisplayName } from '@/lib/displayName';
@@ -211,6 +212,14 @@ function useProvideAuth(): AuthContextValue {
       }
       setUser(mapUser(session?.user ?? null));
       void ensureProfile(session?.user ?? null);
+      if (session?.user && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+        void runJudgeInviteAutoAccept({
+          pathname: typeof window !== 'undefined' ? window.location.pathname : '/',
+          userId: session.user.id,
+          userMetadata: session.user.user_metadata,
+          allowMetadataFallback: event === 'SIGNED_IN',
+        });
+      }
       setLoading(false);
     });
 
@@ -234,6 +243,14 @@ function useProvideAuth(): AuthContextValue {
         }
         setUser(mapUser(session?.user ?? null));
         void ensureProfile(session?.user ?? null);
+        if (session?.user) {
+          void runJudgeInviteAutoAccept({
+            pathname: typeof window !== 'undefined' ? window.location.pathname : '/',
+            userId: session.user.id,
+            userMetadata: session.user.user_metadata,
+            allowMetadataFallback: false,
+          });
+        }
       } catch (err) {
         if (!alive) return;
         console.error('Auth bootstrap error', err);

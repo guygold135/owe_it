@@ -159,6 +159,12 @@
           }
           var hashPathMatch = hash.match(/^\/?judge-invite\/([^/?]+)/i);
           if (hashPathMatch) store(hashPathMatch[1]);
+          if (
+            hash.indexOf('access_token=') >= 0 ||
+            hash.indexOf('type=magiclink') >= 0
+          ) {
+            sessionStorage.setItem('oweit:magic-link-arrival', '1');
+          }
         } catch (e) {}
       })();
     </script>

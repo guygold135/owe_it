@@ -1,4 +1,5 @@
 const PENDING_JUDGE_ACCEPT_KEY = 'oweit:pending-judge-accept';
+const MAGIC_LINK_ARRIVAL_KEY = 'oweit:magic-link-arrival';
 export const JUDGE_INVITE_REQUEST_QUERY_PARAM = 'judgeInviteRequestId';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -45,6 +46,36 @@ export function peekPendingJudgeAccept(): string | null {
   }
 }
 
+export function markMagicLinkArrival(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(MAGIC_LINK_ARRIVAL_KEY, '1');
+  } catch {
+    /* ignore */
+  }
+}
+
+export function consumeMagicLinkArrival(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const value = sessionStorage.getItem(MAGIC_LINK_ARRIVAL_KEY);
+    if (value !== '1') return false;
+    sessionStorage.removeItem(MAGIC_LINK_ARRIVAL_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function peekMagicLinkArrival(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return sessionStorage.getItem(MAGIC_LINK_ARRIVAL_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 function tryStoreJudgeInviteRequestId(raw: string | null | undefined): boolean {
   const id = raw?.trim();
   if (!id || !UUID_RE.test(id)) return false;
@@ -70,7 +101,9 @@ export function captureJudgeInviteFromUrl(): void {
   }
 
   const hashPathMatch = hash.match(/^\/?judge-invite\/([^/?]+)/i);
-  tryStoreJudgeInviteRequestId(hashPathMatch?.[1]);
+  if (tryStoreJudgeInviteRequestId(hashPathMatch?.[1])) return;
+
+  if (urlHasAuthCallbackHash()) markMagicLinkArrival();
 }
 
 export function clearJudgeInviteRequestFromUrl(): void {

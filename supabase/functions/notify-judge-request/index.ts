@@ -180,6 +180,22 @@ serve(async (req: Request): Promise<Response> => {
       return jsonResponse({ emailed: false, reason: "judge_has_no_email" }, corsHeaders, 200);
     }
 
+  // Survives magic-link redirects that drop the /judge-invite path from the URL.
+    const existingMeta = (judgeAuth.user?.user_metadata ?? {}) as Record<string, unknown>;
+    const { error: metaError } = await supabaseAdmin.auth.admin.updateUserById(
+      judgeRequest.judge_user_id,
+      {
+        user_metadata: {
+          ...existingMeta,
+          pending_judge_invite_accept: judgeRequestId,
+          pending_judge_invite_at: new Date().toISOString(),
+        },
+      },
+    );
+    if (metaError) {
+      console.warn("notify-judge-request metadata stamp failed:", metaError.message);
+    }
+
     const { data: requesterProfile } = await supabaseAdmin
       .from("profiles")
       .select("display_name")

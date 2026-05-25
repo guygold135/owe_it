@@ -24,6 +24,7 @@ import {
   consumePendingGoalResume,
   resumeGoalRequestSearchParam,
 } from '@/lib/pendingGoalResume';
+import { notifyRequesterJudgeAcceptedAsRequester } from '@/lib/notifyJudgeAcceptedEmail';
 import { supabase } from '@/integrations/supabase/client';
 
 const queryClient = new QueryClient({
@@ -223,6 +224,7 @@ function LoggedInAppShell({
     if (fromUrl) {
       openResumeGoalRequest(fromUrl);
       clearResumeGoalRequestFromUrl();
+      void notifyRequesterJudgeAcceptedAsRequester(fromUrl);
       return;
     }
 
@@ -238,6 +240,7 @@ function LoggedInAppShell({
       .then(({ data }) => {
         if (data?.status === 'accepted') {
           openResumeGoalRequest(pending);
+          void notifyRequesterJudgeAcceptedAsRequester(pending);
         }
       });
   }, [user?.id, openResumeGoalRequest]);

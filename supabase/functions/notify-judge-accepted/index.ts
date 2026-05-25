@@ -102,7 +102,7 @@ serve(async (req: Request): Promise<Response> => {
     if (judgeRequest.status !== "accepted") {
       return jsonResponse({ emailed: false, reason: "not_accepted" }, corsHeaders, 200);
     }
-    if (judgeRequest.judge_user_id !== authUserId) {
+    if (judgeRequest.judge_user_id !== authUserId && judgeRequest.requester_user_id !== authUserId) {
       return jsonResponse({ error: "Forbidden" }, corsHeaders, 403);
     }
     if (!judgeRequest.requester_departed_at) {

@@ -825,7 +825,7 @@ export function CreateGoalSheet({
         void supabase.rpc('cancel_judge_request', { p_request_id: pendingId }).then(({ error }) => {
           if (error) console.error('Cancel judge request on close', error);
         });
-      } else if (closeIntent === 'leave') {
+      } else {
         void supabase.rpc('mark_judge_request_requester_departed', { p_request_id: pendingId }).then(({ error }) => {
           if (error) console.error('Mark judge request departed', error);
         });
@@ -891,12 +891,16 @@ export function CreateGoalSheet({
     onClose();
   };
 
-  const leaveJudgeWaitForNow = () => {
+  const leaveJudgeWaitForNow = async () => {
     flushSync(() => setConfirmCloseKind(null));
     const id = judgeRequestIdRef.current;
+    judgeWaitCloseIntentRef.current = 'leave';
     if (id) {
-      judgeWaitCloseIntentRef.current = 'leave';
+      const { error } = await supabase.rpc('mark_judge_request_requester_departed', { p_request_id: id });
+      if (error) console.error('Mark judge request departed', error);
+      storePendingGoalResume(id);
     }
+    clearWatchingJudgeRequest();
     onClose();
   };
 

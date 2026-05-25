@@ -4,7 +4,7 @@ import { useAppTutorial } from '@/hooks/useAppTutorial';
 import { APP_TUTORIAL_SHEET_STEP_TO_PHASE, isAppTutorialSheetPhase } from '@/lib/appTutorial';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar, UserPlus } from 'lucide-react';
+import { X, ChevronRight, AlertTriangle, User, Users, Lock, Eye, Calendar, UserPlus, Pencil } from 'lucide-react';
 import type { BraintreePaymentInstance } from '@/components/braintree/braintreePayment';
 import { useGoals } from '@/hooks/useGoals';
 import { useAuth } from '@/hooks/useAuth';
@@ -52,6 +52,12 @@ import {
   toDatetimeLocalString,
 } from '@/components/create-goal-sheet/helpers';
 import { notifyJudgeRequestByEmail } from '@/lib/notifyJudgeRequestEmail';
+import {
+  clearWatchingJudgeRequest,
+  parseGoalDraftPayload,
+  setWatchingJudgeRequest,
+  storePendingGoalResume,
+} from '@/lib/pendingGoalResume';
 import { CardStepContinueButton, CardStepFields } from '@/components/create-goal-sheet/CardStep';
 import { PaymentMethodConsentNotice } from '@/components/PaymentMethodConsentNotice';
 import {
@@ -152,7 +158,17 @@ async function callCreateCheckoutWithSession(body: Record<string, unknown>) {
   return parsed;
 }
 
-export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CreateGoalSheet({
+  open,
+  onClose,
+  resumeJudgeRequestId = null,
+  onResumeHandled,
+}: {
+  open: boolean;
+  onClose: () => void;
+  resumeJudgeRequestId?: string | null;
+  onResumeHandled?: () => void;
+}) {
   const {
     tutorialActive,
     sheetCloseLocked,
@@ -188,6 +204,8 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const [cardFieldsComplete, setCardFieldsComplete] = useState(false);
   const [cardStepSubmitting, setCardStepSubmitting] = useState(false);
   const [paymentMethodConsent, setPaymentMethodConsent] = useState(false);
+  const [confirmEditing, setConfirmEditing] = useState(false);
+  const confirmTitleInputRef = useRef<HTMLInputElement | null>(null);
   const [customStakeError, setCustomStakeError] = useState(false);
   const [customStakeInput, setCustomStakeInput] = useState('');
   const [selectedCharityId, setSelectedCharityId] = useState(DEFAULT_CHARITY_ID);
@@ -212,6 +230,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   const preserveDraftOnNextCloseRef = useRef(false);
   /** judge-wait dialog: full sheet close (X/backdrop) vs return to judge picker (Back button) */
   const judgeWaitDismissRef = useRef<'sheet' | 'back-to-picker'>('sheet');
+  const judgeWaitCloseIntentRef = useRef<'cancel' | 'leave' | null>(null);
 
   useLayoutEffect(() => {
     if (!showAddFriendPanel) return;
@@ -226,6 +245,90 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   useEffect(() => {
     judgeRequestRowSeenRef.current = false;
   }, [judgeRequestId]);
+
+  useEffect(() => {
+    if (open && judgeRequestId) {
+      setWatchingJudgeRequest(judgeRequestId);
+      return () => clearWatchingJudgeRequest();
+    }
+    clearWatchingJudgeRequest();
+  }, [open, judgeRequestId]);
+
+  useEffect(() => {
+    if (!open || !resumeJudgeRequestId || !user?.id) return;
+
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from('judge_requests')
+        .select('id, status, goal_payload, judge_user_id')
+        .eq('id', resumeJudgeRequestId)
+        .eq('requester_user_id', user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (error || !data || data.status !== 'accepted') {
+        toast.error('Could not resume this goal setup.');
+        onResumeHandled?.();
+        return;
+      }
+
+      const draft = parseGoalDraftPayload(data.goal_payload);
+      if (!draft) {
+        toast.error('Could not load your saved goal details.');
+        onResumeHandled?.();
+        return;
+      }
+
+      setTitle(draft.title ?? '');
+      setDescription(draft.description ?? '');
+      const resolvedStake = Number(draft.stake ?? 0);
+      setStake(resolvedStake);
+      setCustomStakeInput(
+        resolvedStake > 0
+          ? resolvedStake === Math.floor(resolvedStake)
+            ? String(resolvedStake)
+            : resolvedStake.toFixed(2)
+          : '',
+      );
+      if (draft.deadline) {
+        const deadlineDate = new Date(draft.deadline);
+        if (!Number.isNaN(deadlineDate.getTime())) {
+          setDeadline(toDatetimeLocalString(deadlineDate));
+        }
+      }
+      setIsPrivate(Boolean(draft.isPrivate));
+      setSelectedCharityId(draft.charityId ?? DEFAULT_CHARITY_ID);
+      setJudgeRequestId(null);
+      setWaitingJudgeName(null);
+
+      const judgeUserId = data.judge_user_id as string | null;
+      if (judgeUserId) {
+        const { data: judgeProfile } = await supabase
+          .from('profiles')
+          .select('display_name, avatar_url')
+          .eq('id', judgeUserId)
+          .maybeSingle();
+        if (!cancelled) {
+          setJudge({
+            id: judgeUserId,
+            name: judgeProfile?.display_name?.trim() || 'Friend',
+            avatar: judgeProfile?.avatar_url?.trim() || '',
+            isSelf: false,
+          });
+        }
+      }
+
+      if (!cancelled) {
+        setStep(resolvedStake > 0 ? 3 : 4);
+        onResumeHandled?.();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, resumeJudgeRequestId, user?.id, onResumeHandled]);
 
   useEffect(() => {
     stakeRef.current = stake;
@@ -276,6 +379,18 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
   useEffect(() => {
     if (step !== 4) setSignOverlayPhase('idle');
   }, [step]);
+
+  useEffect(() => {
+    if (step !== 4) setConfirmEditing(false);
+  }, [step]);
+
+  useEffect(() => {
+    if (!confirmEditing) return;
+    const id = requestAnimationFrame(() => {
+      confirmTitleInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [confirmEditing]);
 
   useEffect(() => {
     if (!open || step !== 0) return;
@@ -693,18 +808,30 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
     setJudgeByIdResult(null);
     setJudgeByIdSearching(false);
     setJudgeByIdSending(false);
+    setConfirmEditing(false);
   };
 
-  /** Closing the sheet = abandoning goal creation → cancel pending judge request for the judge */
+  /** Closing the sheet: cancel judge request only when the user explicitly chose to cancel. */
   useEffect(() => {
     if (open) return;
     const preserveDraft = preserveDraftOnNextCloseRef.current;
     preserveDraftOnNextCloseRef.current = false;
     const pendingId = judgeRequestIdRef.current;
+    const closeIntent = judgeWaitCloseIntentRef.current;
+    judgeWaitCloseIntentRef.current = null;
+
     if (pendingId) {
-      void supabase.rpc('cancel_judge_request', { p_request_id: pendingId }).then(({ error }) => {
-        if (error) console.error('Cancel judge request on close', error);
-      });
+      if (closeIntent === 'cancel') {
+        void supabase.rpc('cancel_judge_request', { p_request_id: pendingId }).then(({ error }) => {
+          if (error) console.error('Cancel judge request on close', error);
+        });
+      } else if (closeIntent === 'leave') {
+        void supabase.rpc('mark_judge_request_requester_departed', { p_request_id: pendingId }).then(({ error }) => {
+          if (error) console.error('Mark judge request departed', error);
+        });
+        storePendingGoalResume(pendingId);
+      }
+      clearWatchingJudgeRequest();
     }
     if (!preserveDraft) {
       reset();
@@ -748,6 +875,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       flushSync(() => setConfirmCloseKind(null));
       const id = judgeRequestIdRef.current;
       if (id) {
+        judgeWaitCloseIntentRef.current = 'cancel';
         void supabase.rpc('cancel_judge_request', { p_request_id: id }).then(({ error }) => {
           if (error) console.error('Cancel judge request error', error);
         });
@@ -756,7 +884,19 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
       setWaitingJudgeName(null);
       return;
     }
+    if (confirmCloseKind === 'judge-wait') {
+      judgeWaitCloseIntentRef.current = 'cancel';
+    }
     flushSync(() => setConfirmCloseKind(null));
+    onClose();
+  };
+
+  const leaveJudgeWaitForNow = () => {
+    flushSync(() => setConfirmCloseKind(null));
+    const id = judgeRequestIdRef.current;
+    if (id) {
+      judgeWaitCloseIntentRef.current = 'leave';
+    }
     onClose();
   };
 
@@ -1095,7 +1235,7 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
               <AlertDialogContent className="max-w-md mx-4 rounded-2xl border-border">
                 <AlertDialogHeader>
                   <AlertDialogTitle className="font-display">
-                    {confirmCloseKind === 'judge-wait' && 'Cancel this judge request?'}
+                    {confirmCloseKind === 'judge-wait' && 'Leave goal setup?'}
                     {confirmCloseKind === 'card' && 'Leave card details?'}
                     {confirmCloseKind === 'sign' && 'Leave before signing?'}
                     {confirmCloseKind === 'tutorial-exit' && 'Exit the tutorial?'}
@@ -1111,8 +1251,8 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       <>
                         {waitingJudgeName
                           ? `${waitingJudgeName} hasn’t responded yet. `
-                          : 'Your friend hasn’t responded yet. '}
-                        If you leave now, the request will be cancelled and they won’t see it anymore.
+                          : 'Your judge hasn’t responded yet. '}
+                        You can keep waiting, leave and get notified when they accept, or cancel the request.
                       </>
                     )}
                     {confirmCloseKind === 'card' && (
@@ -1129,18 +1269,27 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                     )}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
-                <AlertDialogFooter className="gap-2 sm:gap-0">
+                <AlertDialogFooter className="flex-col gap-2 sm:flex-col sm:space-x-0">
                   <AlertDialogCancel className="rounded-xl font-display font-semibold mt-0">
                     {confirmCloseKind === 'judge-wait' && 'Keep waiting'}
                     {confirmCloseKind === 'card' && 'Keep card step'}
                     {confirmCloseKind === 'sign' && 'Keep signing'}
                     {confirmCloseKind === 'tutorial-exit' && 'Keep tutorial'}
                   </AlertDialogCancel>
+                  {confirmCloseKind === 'judge-wait' ? (
+                    <button
+                      type="button"
+                      onClick={leaveJudgeWaitForNow}
+                      className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-display font-bold text-primary-foreground hover:bg-primary/90"
+                    >
+                      Leave — notify me when they accept
+                    </button>
+                  ) : null}
                   <AlertDialogAction
                     onClick={confirmCloseDialog}
                     className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 font-display font-bold"
                   >
-                    {confirmCloseKind === 'judge-wait' && 'Yes, cancel request'}
+                    {confirmCloseKind === 'judge-wait' && 'Cancel judge request'}
                     {confirmCloseKind === 'card' && 'Yes, leave'}
                     {confirmCloseKind === 'sign' && 'Yes, leave'}
                     {confirmCloseKind === 'tutorial-exit' && 'Yes, exit tutorial'}
@@ -1761,15 +1910,79 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       </p>
                     </div>
                   )}
-                  <div className="shrink-0 rounded-[24px] bg-muted p-6 space-y-4">
-                    <div className="flex justify-between">
-                      <span className="text-xs uppercase tracking-widest text-muted-foreground">Goal</span>
-                      <span className="text-sm text-foreground font-medium">{title}</span>
+                  <div className="relative shrink-0 rounded-[24px] bg-muted p-6 space-y-4">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmEditing((v) => !v)}
+                      className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
+                      aria-label={confirmEditing ? 'Done editing goal details' : 'Edit goal title and deadline'}
+                      aria-pressed={confirmEditing}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <div className="flex justify-between gap-8 pr-10">
+                      <span className="text-xs uppercase tracking-widest text-muted-foreground shrink-0">Goal</span>
+                      {confirmEditing ? (
+                        <input
+                          ref={confirmTitleInputRef}
+                          type="text"
+                          value={title}
+                          onChange={(e) => setTitle(e.target.value)}
+                          className="min-w-0 flex-1 rounded-lg bg-background px-2 py-1 text-right text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        />
+                      ) : (
+                        <span className="text-sm text-foreground font-medium truncate">{title}</span>
+                      )}
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-xs uppercase tracking-widest text-muted-foreground">Deadline</span>
-                      <span className="text-sm text-foreground tabular-nums">{deadlineDate?.toLocaleDateString()}</span>
+                    {confirmEditing && duplicateActiveTitle && (
+                      <p className="text-xs text-destructive text-right">
+                        You already have an active goal with this name.
+                      </p>
+                    )}
+                    <div className="flex justify-between gap-8">
+                      <span className="text-xs uppercase tracking-widest text-muted-foreground shrink-0">Deadline</span>
+                      {confirmEditing ? (
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={openDeadlinePicker}
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter' && e.key !== ' ') return;
+                            e.preventDefault();
+                            openDeadlinePicker();
+                          }}
+                          className={`relative min-w-0 flex-1 max-w-[min(100%,14rem)] ml-auto ${
+                            deadlineIssue ? 'ring-2 ring-destructive rounded-lg' : ''
+                          }`}
+                        >
+                          <div className="flex items-center justify-end gap-2 rounded-lg bg-background px-2 py-1 text-sm text-foreground tabular-nums">
+                            <span className="truncate">
+                              {deadlineDate ? deadlineDate.toLocaleString() : 'Select a deadline'}
+                            </span>
+                            <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          </div>
+                          <input
+                            ref={deadlineInputRef}
+                            type="datetime-local"
+                            value={deadline}
+                            min={minDeadlineInput}
+                            step={60}
+                            onChange={(e) => applyDeadlinePick(e.target.value)}
+                            onInput={(e) => applyDeadlinePick(e.currentTarget.value)}
+                            onBlur={(e) => applyDeadlinePick(e.target.value)}
+                            aria-invalid={deadlineIssue ? true : undefined}
+                            className="absolute inset-0 z-10 h-full w-full cursor-pointer bg-transparent text-transparent caret-transparent opacity-[0.01] appearance-none [color-scheme:dark]"
+                          />
+                        </div>
+                      ) : (
+                        <span className="text-sm text-foreground tabular-nums">
+                          {deadlineDate?.toLocaleDateString()}
+                        </span>
+                      )}
                     </div>
+                    {confirmEditing && deadlineIssue && (
+                      <p className="text-xs text-destructive text-right">{deadlineIssue}</p>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-xs uppercase tracking-widest text-muted-foreground">Stake</span>
                       <span
@@ -1795,6 +2008,9 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                   <p className="pt-4 text-center text-xs font-medium uppercase tracking-widest text-muted-foreground/80">
                     HOLD TO ACCEPT
                   </p>
+                  {!confirmEditing && deadlineIssue && (
+                    <p className="pt-3 text-center text-xs text-destructive">{deadlineIssue}</p>
+                  )}
                   <div className="mt-auto flex shrink-0 gap-3 pt-6">
                     <button
                       type="button"
@@ -1807,6 +2023,11 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                       progressStyle="fill"
                       holdDuration={2000}
                       progressTickMs={30}
+                      disabled={
+                        Boolean(deadlineIssue) ||
+                        title.trim().length === 0 ||
+                        duplicateActiveTitle
+                      }
                       labels={{
                         idle: 'Create goal',
                         holding: 'Sure?',
@@ -1815,6 +2036,14 @@ export function CreateGoalSheet({ open, onClose }: { open: boolean; onClose: () 
                         const err = getDeadlineValidationError(deadlineDate, deadline.length > 0, allowShortDeadlines);
                         if (err) {
                           toast.error(err);
+                          return false;
+                        }
+                        if (title.trim().length === 0) {
+                          toast.error('Enter a goal title.');
+                          return false;
+                        }
+                        if (duplicateActiveTitle) {
+                          toast.error('You already have an active goal with this name.');
                           return false;
                         }
                         return true;

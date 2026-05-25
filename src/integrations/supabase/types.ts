@@ -144,6 +144,7 @@ export type Database = {
           judge_user_id: string
           status: Database["public"]["Enums"]["judge_request_status"]
           goal_payload: Json
+          requester_departed_at: string | null
           created_at: string
           updated_at: string
         }
@@ -153,6 +154,7 @@ export type Database = {
           judge_user_id: string
           status?: Database["public"]["Enums"]["judge_request_status"]
           goal_payload: Json
+          requester_departed_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -162,6 +164,7 @@ export type Database = {
           judge_user_id?: string
           status?: Database["public"]["Enums"]["judge_request_status"]
           goal_payload?: Json
+          requester_departed_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -223,6 +226,7 @@ export type Database = {
           title: string
           body: string
           goal_id: string | null
+          judge_request_id: string | null
           read_at: string | null
           created_at: string
         }
@@ -233,6 +237,7 @@ export type Database = {
           title: string
           body: string
           goal_id?: string | null
+          judge_request_id?: string | null
           read_at?: string | null
           created_at?: string
         }
@@ -243,6 +248,7 @@ export type Database = {
           title?: string
           body?: string
           goal_id?: string | null
+          judge_request_id?: string | null
           read_at?: string | null
           created_at?: string
         }
@@ -290,6 +296,10 @@ export type Database = {
         Returns: undefined
       }
       cancel_judge_request: {
+        Args: { p_request_id: string }
+        Returns: undefined
+      }
+      mark_judge_request_requester_departed: {
         Args: { p_request_id: string }
         Returns: undefined
       }

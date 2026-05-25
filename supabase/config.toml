@@ -42,5 +42,8 @@ verify_jwt = false
 [functions.notify-judge-request]
 verify_jwt = false
 
+[functions.notify-judge-accepted]
+verify_jwt = false
+
 [functions.send-deadline-reminders]
 verify_jwt = false

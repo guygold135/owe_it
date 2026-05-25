@@ -7,6 +7,7 @@ import { useFriendsData } from '@/hooks/useFriendsData';
 import { queryKeys } from '@/lib/queryKeys';
 import { JudgeRequestInviteCard } from '@/components/ui/judge-request-invite';
 import { judgeRequestDescriptionLine, judgeRequestPayloadLines } from '@/lib/judgeRequestUi';
+import { notifyRequesterJudgeAccepted } from '@/lib/notifyJudgeAcceptedEmail';
 import type { FriendsBundle } from '@/lib/fetchers/tabData';
 import { cn } from '@/lib/utils';
 
@@ -89,6 +90,7 @@ export function JudgeRequestToastHost() {
       }
       invalidate();
       void refetch();
+      void notifyRequesterJudgeAccepted(id);
     },
     [invalidate, optimisticRemoveJudgeRequest, refetch],
   );

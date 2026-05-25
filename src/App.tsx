@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider, useIsFetching } from "@tanstack/react-query";
 import { Capacitor } from '@capacitor/core';
 import { BrowserRouter, HashRouter, Route, Routes, Navigate } from "react-router-dom";
@@ -13,11 +13,18 @@ import { useAbandonStaleJudgeRequestsOnBootstrap } from "@/hooks/useAbandonStale
 import { usePendingJudgeInviteRedirect } from "@/hooks/usePendingJudgeInviteRedirect";
 import { JudgeRequestToastHost } from "@/components/JudgeRequestToastHost";
 import { JudgeGoalCreatedNoticeHost } from "@/components/JudgeGoalCreatedNoticeHost";
+import { JudgeAcceptedNoticeHost, useResumeGoalRequestListener } from "@/components/JudgeAcceptedNoticeHost";
 import { DeadlineReminderToastHost } from "@/components/DeadlineReminderToastHost";
 import { RetryPaymentModalHost } from "@/components/RetryPaymentModalHost";
 import { FriendRequestToastHost } from "@/components/FriendRequestToastHost";
 import { PasswordRecoveryScreen } from "@/components/PasswordRecoveryScreen";
 import { APP_LOGO_SRC } from "@/lib/brandAssets";
+import {
+  clearResumeGoalRequestFromUrl,
+  consumePendingGoalResume,
+  resumeGoalRequestSearchParam,
+} from '@/lib/pendingGoalResume';
+import { supabase } from '@/integrations/supabase/client';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -184,14 +191,56 @@ function LoggedInAppShell({
   createOpen: boolean;
   setCreateOpen: (v: boolean) => void;
 }) {
+  const { user } = useAuth();
   const { phase, tutorialBootBlocking, fabSpotlight, onFabPhaseCreateOpened, highlightNavTab } = useAppTutorial();
   usePendingJudgeInviteRedirect();
+  const [resumeJudgeRequestId, setResumeJudgeRequestId] = useState<string | null>(null);
   const isFetching = useIsFetching();
   const [showShellSplash, setShowShellSplash] = useState(() =>
     typeof window !== 'undefined' ? sessionStorage.getItem(SHELL_SPLASH_KEY) !== '1' : false,
   );
   const [shellSplashMinElapsed, setShellSplashMinElapsed] = useState(false);
   const [shellSplashMaxElapsed, setShellSplashMaxElapsed] = useState(false);
+
+  const handleResumeHandled = useCallback(() => {
+    setResumeJudgeRequestId(null);
+  }, []);
+
+  const openResumeGoalRequest = useCallback(
+    (requestId: string) => {
+      setResumeJudgeRequestId(requestId);
+      setCreateOpen(true);
+    },
+    [setCreateOpen],
+  );
+
+  useResumeGoalRequestListener(openResumeGoalRequest);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const fromUrl = resumeGoalRequestSearchParam();
+    if (fromUrl) {
+      openResumeGoalRequest(fromUrl);
+      clearResumeGoalRequestFromUrl();
+      return;
+    }
+
+    const pending = consumePendingGoalResume();
+    if (!pending) return;
+
+    void supabase
+      .from('judge_requests')
+      .select('id, status')
+      .eq('id', pending)
+      .eq('requester_user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.status === 'accepted') {
+          openResumeGoalRequest(pending);
+        }
+      });
+  }, [user?.id, openResumeGoalRequest]);
 
   useEffect(() => {
     let cancelled = false;
@@ -279,7 +328,12 @@ function LoggedInAppShell({
         />
         {createOpen ? (
           <Suspense fallback={<div className="fixed inset-0 z-50 bg-background/70 backdrop-blur-sm" />}>
-            <CreateGoalSheet open={createOpen} onClose={() => setCreateOpen(false)} />
+            <CreateGoalSheet
+              open={createOpen}
+              onClose={() => setCreateOpen(false)}
+              resumeJudgeRequestId={resumeJudgeRequestId}
+              onResumeHandled={handleResumeHandled}
+            />
           </Suspense>
         ) : null}
       </div>
@@ -287,6 +341,7 @@ function LoggedInAppShell({
       <FriendRequestToastHost />
       <JudgeRequestToastHost />
       <JudgeGoalCreatedNoticeHost />
+      <JudgeAcceptedNoticeHost />
       <DeadlineReminderToastHost />
       <RetryPaymentModalHost />
     </div>

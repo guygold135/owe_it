@@ -24,3 +24,14 @@ jobs:
             -H "Content-Type: application/json" \
             -H "x-cron-secret: $AUTO_EXPIRE_CRON_SECRET" \
             -d '{"batchSize":100}'
+
+      - name: Send deadline reminder emails
+        env:
+          REMINDER_URL: https://lngepgvviuqanzlslqhf.supabase.co/functions/v1/send-deadline-reminders
+          AUTO_EXPIRE_CRON_SECRET: ${{ secrets.AUTO_EXPIRE_CRON_SECRET }}
+        run: |
+          curl --fail-with-body \
+            -X POST "$REMINDER_URL" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: $AUTO_EXPIRE_CRON_SECRET" \
+            -d '{}'

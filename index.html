@@ -158,12 +158,17 @@
             }
           }
           var hashPathMatch = hash.match(/^\/?judge-invite\/([^/?]+)/i);
-          if (hashPathMatch) store(hashPathMatch[1]);
+          if (hashPathMatch) {
+            store(hashPathMatch[1]);
+            sessionStorage.setItem('oweit:judge-email-flow', '1');
+          }
           if (
             hash.indexOf('access_token=') >= 0 ||
             hash.indexOf('type=magiclink') >= 0
           ) {
-            sessionStorage.setItem('oweit:magic-link-arrival', '1');
+            if (!sessionStorage.getItem('oweit:pending-judge-accept')) {
+              sessionStorage.setItem('oweit:magic-link-auth-pending', '1');
+            }
           }
         } catch (e) {}
       })();

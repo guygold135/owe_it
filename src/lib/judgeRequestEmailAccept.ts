@@ -1,5 +1,6 @@
 const PENDING_JUDGE_ACCEPT_KEY = 'oweit:pending-judge-accept';
-const MAGIC_LINK_ARRIVAL_KEY = 'oweit:magic-link-arrival';
+const JUDGE_EMAIL_FLOW_KEY = 'oweit:judge-email-flow';
+const MAGIC_LINK_AUTH_KEY = 'oweit:magic-link-auth-pending';
 export const JUDGE_INVITE_REQUEST_QUERY_PARAM = 'judgeInviteRequestId';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -20,6 +21,7 @@ export function storePendingJudgeAccept(requestId: string): void {
   if (typeof window === 'undefined' || !requestId.trim()) return;
   try {
     sessionStorage.setItem(PENDING_JUDGE_ACCEPT_KEY, requestId.trim());
+    sessionStorage.setItem(JUDGE_EMAIL_FLOW_KEY, '1');
   } catch {
     /* ignore */
   }
@@ -46,31 +48,62 @@ export function peekPendingJudgeAccept(): string | null {
   }
 }
 
-export function markMagicLinkArrival(): void {
+export function markJudgeEmailFlow(): void {
   if (typeof window === 'undefined') return;
   try {
-    sessionStorage.setItem(MAGIC_LINK_ARRIVAL_KEY, '1');
+    sessionStorage.setItem(JUDGE_EMAIL_FLOW_KEY, '1');
   } catch {
     /* ignore */
   }
 }
 
-export function consumeMagicLinkArrival(): boolean {
+export function consumeJudgeEmailFlow(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    const value = sessionStorage.getItem(MAGIC_LINK_ARRIVAL_KEY);
+    const value = sessionStorage.getItem(JUDGE_EMAIL_FLOW_KEY);
     if (value !== '1') return false;
-    sessionStorage.removeItem(MAGIC_LINK_ARRIVAL_KEY);
+    sessionStorage.removeItem(JUDGE_EMAIL_FLOW_KEY);
     return true;
   } catch {
     return false;
   }
 }
 
-export function peekMagicLinkArrival(): boolean {
+export function peekJudgeEmailFlow(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    return sessionStorage.getItem(MAGIC_LINK_ARRIVAL_KEY) === '1';
+    return sessionStorage.getItem(JUDGE_EMAIL_FLOW_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Set when a magic-link auth hash is present but the invite id was stripped from the URL. */
+export function markMagicLinkAuthPending(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(MAGIC_LINK_AUTH_KEY, '1');
+  } catch {
+    /* ignore */
+  }
+}
+
+export function consumeMagicLinkAuthPending(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const value = sessionStorage.getItem(MAGIC_LINK_AUTH_KEY);
+    if (value !== '1') return false;
+    sessionStorage.removeItem(MAGIC_LINK_AUTH_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function peekMagicLinkAuthPending(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return sessionStorage.getItem(MAGIC_LINK_AUTH_KEY) === '1';
   } catch {
     return false;
   }
@@ -103,7 +136,7 @@ export function captureJudgeInviteFromUrl(): void {
   const hashPathMatch = hash.match(/^\/?judge-invite\/([^/?]+)/i);
   if (tryStoreJudgeInviteRequestId(hashPathMatch?.[1])) return;
 
-  if (urlHasAuthCallbackHash()) markMagicLinkArrival();
+  if (urlHasAuthCallbackHash()) markMagicLinkAuthPending();
 }
 
 export function clearJudgeInviteRequestFromUrl(): void {

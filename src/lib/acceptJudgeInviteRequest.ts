@@ -5,9 +5,11 @@ import {
   captureJudgeInviteFromUrl,
   consumePendingJudgeAccept,
   clearJudgeInviteRequestFromUrl,
-  consumeMagicLinkArrival,
+  consumeJudgeEmailFlow,
+  consumeMagicLinkAuthPending,
+  peekJudgeEmailFlow,
+  peekMagicLinkAuthPending,
   peekPendingJudgeAccept,
-  peekMagicLinkArrival,
 } from '@/lib/judgeRequestEmailAccept';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -20,7 +22,10 @@ const acceptInflight = new Map<string, Promise<boolean>>();
 export function resolveJudgeInviteRequestId(pathname: string): string | null {
   const pathMatch = pathname.match(/\/judge-invite\/([^/]+)/i);
   if (pathMatch?.[1] && UUID_RE.test(pathMatch[1])) return pathMatch[1];
-  return peekPendingJudgeAccept();
+  if (peekJudgeEmailFlow() || pathname.includes('/judge-invite/')) {
+    return peekPendingJudgeAccept();
+  }
+  return null;
 }
 
 function resolveJudgeInviteFromMetadata(
@@ -45,6 +50,12 @@ async function clearJudgeInviteMetadata(): Promise<void> {
       [METADATA_INVITE_AT_KEY]: null,
     },
   });
+}
+
+function clearEmailFlowFlags(): void {
+  consumePendingJudgeAccept();
+  consumeJudgeEmailFlow();
+  consumeMagicLinkAuthPending();
 }
 
 async function rpcAcceptJudgeRequest(requestId: string) {
@@ -74,9 +85,8 @@ export async function ensureJudgeInviteAccepted(requestId: string): Promise<bool
     if (error) {
       const msg = (error.message ?? '').toLowerCase();
       if (msg.includes('not pending') || msg.includes('not found')) {
-        consumePendingJudgeAccept();
         clearJudgeInviteRequestFromUrl();
-        consumeMagicLinkArrival();
+        clearEmailFlowFlags();
         await clearJudgeInviteMetadata();
         return true;
       }
@@ -85,9 +95,8 @@ export async function ensureJudgeInviteAccepted(requestId: string): Promise<bool
       return false;
     }
 
-    consumePendingJudgeAccept();
     clearJudgeInviteRequestFromUrl();
-    consumeMagicLinkArrival();
+    clearEmailFlowFlags();
     await clearJudgeInviteMetadata();
     toast.success('You accepted the judge request.');
     void notifyRequesterJudgeAccepted(id);
@@ -102,46 +111,41 @@ export function primeJudgeInviteFromUrl(): void {
   captureJudgeInviteFromUrl();
 }
 
-async function resolveLatestPendingJudgeRequest(userId: string): Promise<string | null> {
-  const { data, error } = await supabase
-    .from('judge_requests')
-    .select('id')
-    .eq('judge_user_id', userId)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+function resolveEmailLinkRequestId(
+  pathname: string,
+  userMetadata: Record<string, unknown> | null | undefined,
+  allowMagicLinkMetadata: boolean,
+): string | null {
+  const fromPathOrStored = resolveJudgeInviteRequestId(pathname);
+  if (fromPathOrStored) return fromPathOrStored;
 
-  if (error || !data?.id) return null;
-  return data.id;
+  if (peekJudgeEmailFlow()) {
+    return peekPendingJudgeAccept() ?? resolveJudgeInviteFromMetadata(userMetadata);
+  }
+
+  if (allowMagicLinkMetadata && peekMagicLinkAuthPending()) {
+    return resolveJudgeInviteFromMetadata(userMetadata);
+  }
+
+  return null;
 }
 
 /**
- * Auto-accept after email link sign-in.
- * URL/sessionStorage first; user metadata fallback on fresh SIGNED_IN (survives Supabase redirect stripping the path).
+ * Auto-accept only after the judge email link flow — not on normal sign-in.
  */
 export async function runJudgeInviteAutoAccept(options: {
   pathname: string;
-  userId?: string;
   userMetadata?: Record<string, unknown> | null;
-  allowMetadataFallback?: boolean;
+  /** True only for fresh SIGNED_IN from a magic link (stripped redirect + metadata). */
+  allowMagicLinkMetadata?: boolean;
 }): Promise<boolean> {
   primeJudgeInviteFromUrl();
 
-  let requestId = resolveJudgeInviteRequestId(options.pathname);
-  const mayUseMetadata =
-    options.allowMetadataFallback ||
-    peekMagicLinkArrival() ||
-    Boolean(peekPendingJudgeAccept()) ||
-    options.pathname.includes('/judge-invite/');
-
-  if (!requestId && mayUseMetadata) {
-    requestId = resolveJudgeInviteFromMetadata(options.userMetadata);
-  }
-
-  if (!requestId && mayUseMetadata && options.userId) {
-    requestId = await resolveLatestPendingJudgeRequest(options.userId);
-  }
+  const requestId = resolveEmailLinkRequestId(
+    options.pathname,
+    options.userMetadata,
+    options.allowMagicLinkMetadata ?? false,
+  );
 
   if (!requestId) return false;
   return ensureJudgeInviteAccepted(requestId);

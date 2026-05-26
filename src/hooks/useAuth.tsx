@@ -212,12 +212,11 @@ function useProvideAuth(): AuthContextValue {
       }
       setUser(mapUser(session?.user ?? null));
       void ensureProfile(session?.user ?? null);
-      if (session?.user && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+      if (session?.user && event === 'SIGNED_IN') {
         void runJudgeInviteAutoAccept({
           pathname: typeof window !== 'undefined' ? window.location.pathname : '/',
-          userId: session.user.id,
           userMetadata: session.user.user_metadata,
-          allowMetadataFallback: event === 'SIGNED_IN',
+          allowMagicLinkMetadata: true,
         });
       }
       setLoading(false);
@@ -243,14 +242,6 @@ function useProvideAuth(): AuthContextValue {
         }
         setUser(mapUser(session?.user ?? null));
         void ensureProfile(session?.user ?? null);
-        if (session?.user) {
-          void runJudgeInviteAutoAccept({
-            pathname: typeof window !== 'undefined' ? window.location.pathname : '/',
-            userId: session.user.id,
-            userMetadata: session.user.user_metadata,
-            allowMetadataFallback: false,
-          });
-        }
       } catch (err) {
         if (!alive) return;
         console.error('Auth bootstrap error', err);
